@@ -5,7 +5,6 @@ python-multipart
 cachetools
 pydantic
 python-dotenv
-google-generativeai
 scikit-learn
 numpy
 motor

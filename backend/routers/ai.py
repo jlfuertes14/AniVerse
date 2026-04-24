@@ -80,7 +80,7 @@ async def get_similar(anime_id: int, count: int = Query(10, ge=1, le=20)):
 async def ai_status():
     """Check AI engine status."""
     return {
-        "nlp_search": bool(nlp_search.GEMINI_API_KEY),
+        "nlp_search": True,
         "recommendation_engine": recommendation_engine.is_ready(),
         "corpus_size": recommendation_engine.corpus_size(),
     }
