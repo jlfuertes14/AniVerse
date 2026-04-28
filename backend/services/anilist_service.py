@@ -4,6 +4,7 @@ GraphQL API integration with AniList for rich anime queries.
 """
 import httpx
 import asyncio
+import os
 from typing import Optional
 from backend.models.schemas import AnimeResult
 from backend.cache import search_cache, trending_cache, get_cache_key
@@ -12,20 +13,30 @@ GRAPHQL_URL = "https://graphql.anilist.co"
 
 MAX_RETRIES = 3
 
+ANILIST_TOKEN = os.getenv("ANILIST_TOKEN")
+ANILIST_USER_AGENT = os.getenv("ANILIST_USER_AGENT", "AnimeDiscoveryEngine/1.0")
+ANILIST_REFERER = os.getenv("ANILIST_REFERER")
+
 
 async def _query(query: str, variables: dict = None) -> dict:
     """Execute a GraphQL query against AniList with retry logic."""
     last_error = None
     for attempt in range(MAX_RETRIES):
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
+            headers = {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": ANILIST_USER_AGENT,
+            }
+            if ANILIST_TOKEN:
+                headers["Authorization"] = f"Bearer {ANILIST_TOKEN}"
+            if ANILIST_REFERER:
+                headers["Referer"] = ANILIST_REFERER
+
+            async with httpx.AsyncClient(timeout=15.0, headers=headers) as client:
                 response = await client.post(
                     GRAPHQL_URL,
                     json={"query": query, "variables": variables or {}},
-                    headers={
-                        "Content-Type": "application/json",
-                        "Accept": "application/json",
-                    },
                 )
                 response.raise_for_status()
                 return response.json()
