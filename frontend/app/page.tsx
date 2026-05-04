@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import HomeClient from "@/components/HomeClient";
 import LatestReleases from "@/components/LatestReleases";
 import { getSpotlight, getTrending, getVibes } from "@/lib/api";
@@ -23,11 +24,13 @@ export default async function Home() {
   }
 
   return (
-    <HomeClient 
-      initialTrending={initialTrending}
-      initialVibes={initialVibes}
-      initialSpotlight={initialSpotlight}
-      latestReleases={<LatestReleases />}
-    />
+    <Suspense fallback={null}>
+      <HomeClient 
+        initialTrending={initialTrending}
+        initialVibes={initialVibes}
+        initialSpotlight={initialSpotlight}
+        latestReleases={<LatestReleases />}
+      />
+    </Suspense>
   );
 }
