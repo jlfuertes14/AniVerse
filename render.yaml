@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: anime-discovery-backend
+    runtime: python
+    plan: free
+    buildCommand: pip install -r backend/requirements.txt && python -m playwright install --with-deps
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    autoDeploy: true
+    envVars:
+      - key: MONGODB_URI
+        sync: false
+      - key: PYTHON_VERSION
+        value: 3.12.4
