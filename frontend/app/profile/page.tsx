@@ -1,5 +1,10 @@
+import { Suspense } from "react";
 import ProfilePage from "@/components/ProfilePage";
 
 export default function ProfileRoute() {
-  return <ProfilePage />;
+  return (
+    <Suspense fallback={null}>
+      <ProfilePage />
+    </Suspense>
+  );
 }
