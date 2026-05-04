@@ -3,6 +3,11 @@ import json
 import sys
 import re
 import os
+
+# Ensure Playwright uses a project-local browser cache on Render
+_playwright_cache = os.path.join(os.path.dirname(__file__), ".playwright")
+os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", _playwright_cache)
+
 from playwright.async_api import async_playwright
 
 # Fix for Windows: Playwright requires ProactorEventLoop

@@ -26,6 +26,10 @@ import os
 import re
 from urllib.parse import quote_plus
 
+# Ensure Playwright uses a project-local browser cache on Render
+_playwright_cache = os.path.join(os.path.dirname(__file__), ".playwright")
+os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", _playwright_cache)
+
 # Signal to scraper.py that we're running as a subprocess
 # This makes scraper.py redirect print() to stderr
 os.environ["SCRAPER_SUBPROCESS"] = "1"
