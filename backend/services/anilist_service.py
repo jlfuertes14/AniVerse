@@ -98,6 +98,31 @@ MEDIA_FIELDS = """
 """
 
 
+async def get_airing_schedule_by_mal_id(mal_id: int) -> dict:
+    """Get AniList airing metadata for a MAL ID."""
+    query_str = """
+    query ($malId: Int) {
+        Media(idMal: $malId, type: ANIME) {
+            status
+            nextAiringEpisode {
+                episode
+                airingAt
+            }
+        }
+    }
+    """
+    data = await _query(query_str, {"malId": mal_id})
+    media = data.get("data", {}).get("Media") or {}
+    next_airing = media.get("nextAiringEpisode") or {}
+
+    return {
+        "provider_status": media.get("status"),
+        "is_airing": media.get("status") == "RELEASING",
+        "next_airing_episode": next_airing.get("episode"),
+        "next_airing_at": next_airing.get("airingAt"),
+    }
+
+
 async def get_trending(page: int = 1, per_page: int = 24) -> dict:
     """Get currently trending anime."""
     cache_key = get_cache_key("anilist_trending", page)

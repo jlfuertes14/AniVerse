@@ -1,5 +1,3 @@
-"use client";
-
 import { useRef } from "react";
 import AnimeCard, { AnimeCardSkeleton } from "./AnimeCard";
 import type { Anime } from "@/lib/types";
@@ -23,7 +21,7 @@ export default function TrendingCarousel({ anime, loading = false, onAnimeClick 
     };
 
     return (
-        <section className="trending-section container">
+        <section className="trending-section container-wide">
             <div className="carousel-header">
                 <h2 className="section-heading" style={{ marginBottom: 0 }}>Trending</h2>
                 <div className="carousel-nav">

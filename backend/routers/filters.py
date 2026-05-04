@@ -11,10 +11,18 @@ router = APIRouter(prefix="/filters", tags=["filters"])
 @router.get("/genres")
 async def get_genres():
     """Get all anime genres for filter dropdowns."""
-    return await jikan_service.get_genres()
+    try:
+        return await jikan_service.get_genres()
+    except Exception as e:
+        print(f"[Filters] Genres fetch failed: {e}")
+        return []
 
 
 @router.get("/studios")
 async def get_studios():
     """Get top anime studios for filter dropdowns."""
-    return await jikan_service.get_studios()
+    try:
+        return await jikan_service.get_studios()
+    except Exception as e:
+        print(f"[Filters] Studios fetch failed: {e}")
+        return []

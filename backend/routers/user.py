@@ -73,7 +73,7 @@ async def add_to_watchlist(
                 "status": req.status,
             },
             "$setOnInsert": {
-                "added_at": datetime.now(timezone.utc)
+                "added_at": datetime.now()
             }
         },
         upsert=True
@@ -161,7 +161,7 @@ async def toggle_favorite(
             "anime_id": anime_id,
             "anime_title": anime_title,
             "anime_image": anime_image,
-            "added_at": datetime.now(timezone.utc)
+            "added_at": datetime.now()
         })
         return {"favorited": True}
 
@@ -194,7 +194,7 @@ async def update_progress(
             "$set": {
                 "episodes_watched": req.episodes_watched,
                 "total_episodes": req.total_episodes,
-                "updated_at": datetime.now(timezone.utc)
+                "updated_at": datetime.now()
             }
         },
         upsert=True

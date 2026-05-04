@@ -22,7 +22,7 @@ export default function AnimeGrid({
 }: AnimeGridProps) {
     if (loading) {
         return (
-            <div className="container">
+            <div className="container-wide">
                 <div className="anime-grid">
                     {Array.from({ length: 12 }).map((_, i) => (
                         <AnimeCardSkeleton key={i} />
@@ -42,7 +42,7 @@ export default function AnimeGrid({
     }
 
     return (
-        <div className="container">
+        <div className="container-wide">
             <div className="anime-grid">
                 {anime.map((a) => (
                     <AnimeCard key={`${a.source}-${a.id}`} anime={a} onClick={onAnimeClick} />

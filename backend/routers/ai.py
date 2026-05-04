@@ -73,6 +73,8 @@ async def get_similar(anime_id: int, count: int = Query(10, ge=1, le=20)):
         return {"results": [], "model_ready": False, "message": "Recommendation model is loading..."}
 
     similar = recommendation_engine.get_similar(anime_id, top_n=count)
+    if not similar:
+        similar = recommendation_engine.get_similar_by_mal(anime_id, top_n=count)
     return {"results": similar, "model_ready": True}
 
 

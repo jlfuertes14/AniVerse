@@ -9,9 +9,12 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@vidstack/react": "^1.12.13",
+    "hls.js": "^1.6.13",
     "next": "16.1.6",
     "react": "19.2.3",
-    "react-dom": "19.2.3"
+    "react-dom": "19.2.3",
+    "vidstack": "^1.12.13"
   },
   "devDependencies": {
     "@types/node": "^20",

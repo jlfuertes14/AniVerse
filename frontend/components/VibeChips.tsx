@@ -1,5 +1,3 @@
-"use client";
-
 import type { VibePreset } from "@/lib/types";
 
 interface VibeChipsProps {
@@ -10,7 +8,7 @@ interface VibeChipsProps {
 
 export default function VibeChips({ vibes, activeVibe, onVibeClick }: VibeChipsProps) {
     return (
-        <section className="vibe-section container" id="vibes-section">
+        <section className="vibe-section container-wide" id="vibes-section">
             <h2 className="section-heading">Discover by Vibe</h2>
             <div className="vibe-chips">
                 {vibes.map((vibe) => (

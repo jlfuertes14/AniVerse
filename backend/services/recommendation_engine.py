@@ -17,6 +17,7 @@ _corpus: list[dict] = []
 _tfidf_matrix = None
 _vectorizer: Optional[TfidfVectorizer] = None
 _anime_ids: list[int] = []
+_anime_mal_ids: list[int | None] = []
 _is_building = False
 _is_ready = False
 
@@ -57,7 +58,7 @@ def _build_feature_text(anime: dict) -> str:
 
 async def build_model(count: int = 200):
     """Fetch trending/popular anime and build the TF-IDF model."""
-    global _corpus, _tfidf_matrix, _vectorizer, _anime_ids, _is_building, _is_ready
+    global _corpus, _tfidf_matrix, _vectorizer, _anime_ids, _anime_mal_ids, _is_building, _is_ready
 
     if _is_building:
         return
@@ -76,6 +77,7 @@ async def build_model(count: int = 200):
                     if isinstance(anime, AnimeResult):
                         all_anime.append({
                             "id": anime.anilist_id or anime.id,
+                            "mal_id": anime.mal_id,
                             "title": anime.title,
                             "title_english": anime.title_english,
                             "synopsis": anime.synopsis,
@@ -102,6 +104,7 @@ async def build_model(count: int = 200):
 
         _corpus = all_anime
         _anime_ids = [a.get("id", 0) for a in all_anime]
+        _anime_mal_ids = [a.get("mal_id") for a in all_anime]
 
         # Build TF-IDF matrix
         texts = [_build_feature_text(a) for a in all_anime]
@@ -136,6 +139,29 @@ def get_similar(anime_id: int, top_n: int = 10) -> list[dict]:
     results = []
     for i in similar_indices:
         if sim_scores[i] > 0.05:  # Minimum similarity threshold
+            anime = _corpus[i].copy()
+            anime["similarity_score"] = round(float(sim_scores[i]) * 100, 1)
+            results.append(anime)
+
+    return results
+
+
+def get_similar_by_mal(mal_id: int, top_n: int = 10) -> list[dict]:
+    """Find anime similar to the given MAL ID using the same TF-IDF corpus."""
+    if not _is_ready or _tfidf_matrix is None:
+        return []
+
+    if mal_id not in _anime_mal_ids:
+        return []
+
+    idx = _anime_mal_ids.index(mal_id)
+    sim_scores = cosine_similarity(_tfidf_matrix[idx:idx+1], _tfidf_matrix).flatten()
+
+    similar_indices = np.argsort(sim_scores)[::-1][1:top_n + 1]
+
+    results = []
+    for i in similar_indices:
+        if sim_scores[i] > 0.05:
             anime = _corpus[i].copy()
             anime["similarity_score"] = round(float(sim_scores[i]) * 100, 1)
             results.append(anime)

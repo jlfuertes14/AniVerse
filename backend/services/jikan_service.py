@@ -65,6 +65,33 @@ def _parse_anime_detail(data: dict) -> AnimeDetail:
             "image_url": char_images.get("image_url", ""),
         })
 
+    related = []
+    for relation in data.get("relations", []) or []:
+        for entry in relation.get("entry", []) or []:
+            images = entry.get("images", {}).get("jpg", {})
+            related.append(AnimeResult(
+                id=entry.get("mal_id", 0),
+                mal_id=entry.get("mal_id"),
+                title=entry.get("name", "Unknown"),
+                image_url=images.get("image_url", ""),
+                large_image_url=images.get("large_image_url", ""),
+                relation=relation.get("relation", ""),
+                source="jikan",
+            ))
+
+    recommendations = []
+    for recommendation in data.get("recommendations", []) or []:
+        entry = recommendation.get("entry", {})
+        images = entry.get("images", {}).get("jpg", {})
+        recommendations.append(AnimeResult(
+            id=entry.get("mal_id", 0),
+            mal_id=entry.get("mal_id"),
+            title=entry.get("title", "Unknown"),
+            image_url=images.get("image_url", ""),
+            large_image_url=images.get("large_image_url", ""),
+            source="jikan",
+        ))
+
     return AnimeDetail(
         **base.model_dump(),
         trailer_url=trailer.get("url"),
@@ -75,13 +102,63 @@ def _parse_anime_detail(data: dict) -> AnimeDetail:
         members=data.get("members"),
         background=data.get("background"),
         characters=characters,
+        related=related[:12],
+        recommendations=recommendations[:12],
     )
+
+
+async def _hydrate_related_images(detail: AnimeDetail) -> AnimeDetail:
+    """Fill missing cover images for related/recommended entries using lightweight Jikan lookups."""
+    buckets = [detail.related or [], detail.recommendations or []]
+    ids_to_fetch: list[int] = []
+    seen_ids: set[int] = set()
+
+    for bucket in buckets:
+        for item in bucket:
+            mal_id = item.mal_id or item.id
+            if not mal_id or item.image_url:
+                continue
+            if mal_id in seen_ids:
+                continue
+            seen_ids.add(mal_id)
+            ids_to_fetch.append(mal_id)
+
+    async def fetch_cover(mal_id: int) -> tuple[int, str, str]:
+        try:
+            data = await _get(f"/anime/{mal_id}")
+            parsed = _parse_anime(data.get("data", {}))
+            return mal_id, parsed.image_url or "", parsed.large_image_url or ""
+        except Exception:
+            return mal_id, "", ""
+
+    if not ids_to_fetch:
+        return detail
+
+    fetched = await asyncio.gather(*(fetch_cover(mal_id) for mal_id in ids_to_fetch[:12]))
+    image_map = {
+        mal_id: {"image_url": image_url, "large_image_url": large_image_url}
+        for mal_id, image_url, large_image_url in fetched
+        if image_url or large_image_url
+    }
+
+    for bucket in buckets:
+        for item in bucket:
+            mal_id = item.mal_id or item.id
+            if not mal_id or mal_id not in image_map:
+                continue
+            if not item.image_url:
+                item.image_url = image_map[mal_id]["image_url"]
+            if not item.large_image_url:
+                item.large_image_url = image_map[mal_id]["large_image_url"]
+
+    return detail
 
 
 async def search_anime(
     query: Optional[str] = None,
     genres: Optional[str] = None,
     producers: Optional[str] = None,
+    type_filter: Optional[str] = None,
     min_score: Optional[int] = None,
     max_score: Optional[int] = None,
     status: Optional[str] = None,
@@ -94,7 +171,7 @@ async def search_anime(
     limit: int = 24,
 ) -> dict:
     """Search anime with filters."""
-    cache_key = get_cache_key("jikan_search", query, genres, producers, status, rating, start_date, end_date, page)
+    cache_key = get_cache_key("jikan_search", query, genres, producers, type_filter, status, rating, start_date, end_date, page)
     if cache_key in search_cache:
         return search_cache[cache_key]
 
@@ -105,6 +182,8 @@ async def search_anime(
         params["genres"] = genres
     if producers:
         params["producers"] = producers
+    if type_filter:
+        params["type"] = type_filter
     if min_score:
         params["min_score"] = min_score
     if max_score:
@@ -156,7 +235,13 @@ async def get_anime_detail(mal_id: int) -> AnimeDetail:
     """Get full anime details by MAL ID."""
     cache_key = get_cache_key("jikan_detail", mal_id)
     if cache_key in search_cache:
-        return search_cache[cache_key]
+        cached_detail = search_cache[cache_key]
+        try:
+            hydrated_cached_detail = await _hydrate_related_images(cached_detail)
+            search_cache[cache_key] = hydrated_cached_detail
+            return hydrated_cached_detail
+        except Exception:
+            return cached_detail
 
     data = await _get(f"/anime/{mal_id}/full")
     detail = _parse_anime_detail(data.get("data", {}))
@@ -174,6 +259,11 @@ async def get_anime_detail(mal_id: int) -> AnimeDetail:
                 "image_url": char_images.get("image_url", ""),
             })
         detail.characters = characters
+    except Exception:
+        pass
+
+    try:
+        detail = await _hydrate_related_images(detail)
     except Exception:
         pass
 
@@ -229,3 +319,42 @@ async def get_random_anime() -> AnimeResult:
     """Get a random anime."""
     data = await _get("/random/anime")
     return _parse_anime(data.get("data", {}))
+
+async def get_prequel_episode_offset(mal_id: int) -> int:
+    """
+    Recursively calculate the total episodes of all prequels.
+    Used for providers that continue episode numbering (e.g. AnimePahe).
+    """
+    cache_key = f"offset_{mal_id}"
+    if cache_key in metadata_cache:
+        return metadata_cache[cache_key]
+
+    try:
+        detail = await get_anime_detail(mal_id)
+        if not detail or not detail.related:
+            metadata_cache[cache_key] = 0
+            return 0
+            
+        prequel_id = None
+        for rel in detail.related:
+            if rel.relation == "Prequel":
+                prequel_id = rel.mal_id
+                break
+                
+        if not prequel_id:
+            metadata_cache[cache_key] = 0
+            return 0
+            
+        prequel_detail = await get_anime_detail(prequel_id)
+        if not prequel_detail:
+            metadata_cache[cache_key] = 0
+            return 0
+            
+        # Current prequel's episodes + recursive prequels
+        count = prequel_detail.episodes or 0
+        total_offset = count + await get_prequel_episode_offset(prequel_id)
+        metadata_cache[cache_key] = total_offset
+        return total_offset
+    except Exception as e:
+        print(f"[Jikan Service] Error calculating offset for {mal_id}: {e}")
+        return 0

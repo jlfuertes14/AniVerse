@@ -4,9 +4,11 @@ httpx
 python-multipart
 cachetools
 pydantic
+email-validator
 python-dotenv
 scikit-learn
 numpy
 motor
 bcrypt
 python-jose[cryptography]
+playwright

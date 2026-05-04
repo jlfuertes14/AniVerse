@@ -10,6 +10,8 @@ import type {
     Genre,
     Studio,
     SearchFilters,
+    LatestRelease,
+    WeeklySchedule,
 } from "./types";
 import { getToken } from "./auth";
 import type { User } from "./auth";
@@ -51,6 +53,7 @@ export async function searchAnime(filters: SearchFilters): Promise<PaginatedResp
     if (filters.year_to) params.set("year_to", String(filters.year_to));
     if (filters.status) params.set("status", filters.status);
     if (filters.rating) params.set("rating", filters.rating);
+    if (filters.type) params.set("type", filters.type);
     if (filters.page) params.set("page", String(filters.page));
 
     return fetchAPI<PaginatedResponse>(`/anime/search?${params.toString()}`);
@@ -58,6 +61,18 @@ export async function searchAnime(filters: SearchFilters): Promise<PaginatedResp
 
 export async function getTrending(page: number = 1): Promise<PaginatedResponse> {
     return fetchAPI<PaginatedResponse>(`/anime/trending?page=${page}`);
+}
+
+export async function getLatestReleases(): Promise<LatestRelease[]> {
+    return fetchAPI<LatestRelease[]>("/anime/latest", {
+        next: { revalidate: 600 },
+    });
+}
+
+export async function getAiringSchedule(): Promise<WeeklySchedule> {
+    return fetchAPI<WeeklySchedule>("/anime/schedule", {
+        next: { revalidate: 43200 }, // 12 hours
+    });
 }
 
 export async function getTopAnime(page: number = 1, filter?: string): Promise<PaginatedResponse> {
@@ -159,6 +174,10 @@ export async function getAIStatus(): Promise<{ nlp_search: boolean; recommendati
     return fetchAPI<{ nlp_search: boolean; recommendation_engine: boolean; corpus_size: number }>("/ai/status");
 }
 
+export async function getBanners(): Promise<string[]> {
+    return fetchAPI<string[]>("/banners");
+}
+
 // ─── Auth Endpoints ─────────────────────────────────────
 
 export async function registerUser(username: string, email: string, password: string): Promise<{ token: string; user: User }> {
@@ -177,6 +196,13 @@ export async function loginUser(email: string, password: string): Promise<{ toke
 
 export async function getMe(): Promise<User> {
     return fetchAPI<User>("/auth/me");
+}
+
+export async function updateMe(payload: { username: string; email: string }): Promise<User> {
+    return fetchAPI<User>("/auth/me", {
+        method: "PUT",
+        body: JSON.stringify(payload),
+    });
 }
 
 export async function uploadAvatar(file: File): Promise<{ avatar_url: string }> {
@@ -261,12 +287,14 @@ export async function isFavorited(animeId: number): Promise<{ favorited: boolean
 
 // ─── Comment Endpoints ──────────────────────────────────
 
-export async function getComments(animeId: number): Promise<Comment[]> {
-    return fetchAPI<Comment[]>(`/comments/${animeId}`);
+export async function getComments(animeId: number, episode: number = 0): Promise<Comment[]> {
+    const params = episode > 0 ? `?episode=${episode}` : "";
+    return fetchAPI<Comment[]>(`/comments/${animeId}${params}`);
 }
 
-export async function addComment(animeId: number, content: string): Promise<Comment> {
-    return fetchAPI<Comment>(`/comments/${animeId}`, {
+export async function addComment(animeId: number, content: string, episode: number = 0): Promise<Comment> {
+    const params = episode > 0 ? `?episode=${episode}` : "";
+    return fetchAPI<Comment>(`/comments/${animeId}${params}`, {
         method: "POST",
         body: JSON.stringify({ content }),
     });

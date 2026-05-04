@@ -16,4 +16,4 @@ trending_cache = TTLCache(maxsize=50, ttl=600)
 
 def get_cache_key(*args) -> str:
     """Generate a cache key from arguments."""
-    return ":".join(str(a) for a in args if a is not None)
+    return ":".join(str(a) if a is not None else "" for a in args)

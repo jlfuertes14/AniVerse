@@ -1,22 +1,33 @@
 "use client";
 
-import { useState } from "react";
-import { registerUser, loginUser } from "@/lib/api";
+import { useState, useEffect } from "react";
+import { registerUser, loginUser, getWaifuImage } from "@/lib/api";
 import { setAuth } from "@/lib/auth";
 import type { User } from "@/lib/auth";
 
 interface AuthModalProps {
     onClose: () => void;
     onAuthSuccess: (user: User) => void;
+    prefetchedBanners?: string[];
 }
 
-export default function AuthModal({ onClose, onAuthSuccess }: AuthModalProps) {
+export default function AuthModal({ onClose, onAuthSuccess, prefetchedBanners = [] }: AuthModalProps) {
     const [mode, setMode] = useState<"login" | "register">("login");
     const [username, setUsername] = useState("");
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(false);
+    const [bannerUrl, setBannerUrl] = useState("");
+
+    useEffect(() => {
+        if (prefetchedBanners.length > 0) {
+            const randomBanner = prefetchedBanners[Math.floor(Math.random() * prefetchedBanners.length)];
+            setBannerUrl(randomBanner);
+        } else {
+            getWaifuImage("waifu").then(setBannerUrl).catch(() => {});
+        }
+    }, [prefetchedBanners]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -43,6 +54,10 @@ export default function AuthModal({ onClose, onAuthSuccess }: AuthModalProps) {
     return (
         <div className="auth-overlay" onClick={onClose}>
             <div className="auth-modal" onClick={(e) => e.stopPropagation()}>
+                <div 
+                    className="auth-modal-banner" 
+                    style={bannerUrl ? { backgroundImage: `url(${bannerUrl})` } : {}}
+                ></div>
                 <button className="auth-close" onClick={onClose}>
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
@@ -51,9 +66,11 @@ export default function AuthModal({ onClose, onAuthSuccess }: AuthModalProps) {
 
                 <div className="auth-header">
                     <div className="auth-brand">
-                        <svg viewBox="0 0 24 24" fill="currentColor" width="28" height="28">
-                            <path d="M12 2L1 21h22L12 2zm0 4l7.53 13H4.47L12 6z" />
-                        </svg>
+                        <img 
+                            src="/asuna-yuuki.png" 
+                            alt="Mascot" 
+                            className="auth-mascot"
+                        />
                         <span>AniVerse</span>
                     </div>
                     <p className="auth-subtitle">

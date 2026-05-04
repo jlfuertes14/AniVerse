@@ -2,23 +2,28 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "AniVerse | Discover Anime by Vibe",
+  title: "AniVerse - Watch Free Anime Online HD Streaming",
   description:
-    "Discover your next anime obsession by vibe, not just genre. Explore trending, cyberpunk, 90s aesthetic, and more with our AI-powered discovery engine.",
+    "AniVerse is your ultimate destination to watch free anime online in high definition. Discover your next favorite series by vibe, genre, or mood with our advanced AI-powered engine.",
   keywords: [
-    "anime",
+    "watch anime online",
+    "free anime streaming",
+    "anime HD online",
+    "AniVerse",
     "anime discovery",
-    "find anime",
-    "anime recommendation",
-    "anime search",
-    "MyAnimeList",
-    "AniList",
-    "trace.moe",
-    "anime screenshot search",
+    "watch free anime",
+    "best anime streaming site",
+    "anime recommendation engine",
+    "cyberpunk anime",
+    "90s aesthetic anime",
   ],
+  icons: {
+    icon: "/favicon.svg",
+    apple: "/favicon.svg",
+  },
   openGraph: {
-    title: "AniVerse",
-    description: "Discover anime by vibe, not just genre.",
+    title: "AniVerse - Watch Free Anime Online HD Streaming",
+    description: "Watch free anime online in HD and discover your next obsession by vibe.",
     type: "website",
   },
 };
@@ -29,8 +34,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body>{children}</body>
+    <html lang="en" suppressHydrationWarning>
+      <body suppressHydrationWarning>{children}</body>
     </html>
   );
 }

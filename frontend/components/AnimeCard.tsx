@@ -1,5 +1,3 @@
-"use client";
-
 import type { Anime } from "@/lib/types";
 
 interface AnimeCardProps {

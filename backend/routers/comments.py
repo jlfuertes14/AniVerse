@@ -18,11 +18,12 @@ class CommentRequest(BaseModel):
 
 
 @router.get("/{anime_id}")
-async def get_comments(anime_id: int):
-    """Get all comments for an anime (public)."""
+async def get_comments(anime_id: int, episode: int = 0):
+    """Get all comments for an anime or specific episode (public)."""
     db = get_db()
     
-    cursor = db["comments"].find({"anime_id": anime_id}).sort("created_at", -1)
+    # Filter by anime_id AND episode (episode 0 = general discussion)
+    cursor = db["comments"].find({"anime_id": anime_id, "episode": episode}).sort("created_at", -1)
     comments = await cursor.to_list(length=1000)
     
     # Collect unique user IDs
@@ -54,6 +55,7 @@ async def get_comments(anime_id: int):
         result.append({
             "id": str(c["_id"]),
             "anime_id": c["anime_id"],
+            "episode": c.get("episode", 0),
             "content": c["content"],
             "created_at": c.get("created_at"),
             "updated_at": c.get("updated_at"),
@@ -67,9 +69,10 @@ async def get_comments(anime_id: int):
 async def add_comment(
     anime_id: int,
     req: CommentRequest,
+    episode: int = 0,
     current_user: dict = Depends(get_current_user),
 ):
-    """Add a comment to an anime (auth required)."""
+    """Add a comment to an anime or specific episode (auth required)."""
     if not req.content.strip():
         raise HTTPException(status_code=400, detail="Comment cannot be empty")
     if len(req.content) > 2000:
@@ -78,10 +81,11 @@ async def add_comment(
     user_id = current_user["sub"]
     db = get_db()
     
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc) # Use naive UTC (default system time is often UTC in prod) or standardized naive
     new_comment = {
         "user_id": user_id,
         "anime_id": anime_id,
+        "episode": episode,
         "content": req.content.strip(),
         "created_at": now,
         "updated_at": now
@@ -102,8 +106,10 @@ async def add_comment(
     return {
         "id": comment_id,
         "anime_id": anime_id,
+        "episode": episode,
         "content": req.content.strip(),
         "created_at": now,
+        "updated_at": now,
         "user": {
             "id": user_id,
             "username": user["username"],

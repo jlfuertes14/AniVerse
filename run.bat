@@ -6,9 +6,12 @@ echo   Anime Discovery Engine - Starting...
 echo  ========================================
 echo.
 
+set "BACKEND_PYTHON=%~dp0.venv\Scripts\python.exe"
+if not exist "%BACKEND_PYTHON%" set "BACKEND_PYTHON=python"
+
 :: Start Backend
 echo [1/2] Starting FastAPI backend on port 8000...
-start "Backend - FastAPI" cmd /k "cd /d %~dp0 && python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload"
+start "Backend - FastAPI" cmd /k ""%BACKEND_PYTHON%" -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload"
 
 :: Wait a moment for backend to start
 timeout /t 3 /nobreak >nul

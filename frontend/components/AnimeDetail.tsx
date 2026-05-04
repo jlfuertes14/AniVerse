@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import Link from "next/link";
 import { getAnimeDetail, getSimilarAnime, addToWatchlist, toggleFavorite, isFavorited, getWatchlistStatus } from "@/lib/api";
 import AnimeCard from "./AnimeCard";
 import CommentSection from "./CommentSection";
@@ -31,6 +32,9 @@ export default function AnimeDetail({ anime, isOpen, onClose, onAnimeClick, curr
     const [favorited, setFavorited] = useState(false);
     const [watchlistStatus, setWatchlistStatus] = useState<string | null>(null);
     const [showWatchlistMenu, setShowWatchlistMenu] = useState(false);
+    const charactersRef = useRef<HTMLDivElement | null>(null);
+    const recommendationsRef = useRef<HTMLDivElement | null>(null);
+    const similarRef = useRef<HTMLDivElement | null>(null);
 
     useEffect(() => {
         if (!anime || !isOpen) return;
@@ -71,7 +75,7 @@ export default function AnimeDetail({ anime, isOpen, onClose, onAnimeClick, curr
     const data = detail || anime;
     if (!data) return null;
 
-    const animeId = data.anilist_id || data.id;
+    const animeId = data.mal_id || data.anilist_id || data.id;
 
     const trailerUrl = detail?.trailer_url;
     const youtubeEmbedUrl = trailerUrl?.includes("youtube.com/watch")
@@ -101,6 +105,16 @@ export default function AnimeDetail({ anime, isOpen, onClose, onAnimeClick, curr
         }
     };
 
+    const scrollRail = (ref: { current: HTMLDivElement | null }, direction: "left" | "right") => {
+        const node = ref.current;
+        if (!node) return;
+        const amount = Math.max(280, Math.floor(node.clientWidth * 0.75));
+        node.scrollBy({
+            left: direction === "left" ? -amount : amount,
+            behavior: "smooth",
+        });
+    };
+
     return (
         <div className={`detail-overlay ${isOpen ? "open" : ""}`} onClick={(e) => {
             if (e.target === e.currentTarget) onClose();
@@ -119,96 +133,146 @@ export default function AnimeDetail({ anime, isOpen, onClose, onAnimeClick, curr
 
                 {/* Body */}
                 <div className="detail-body">
-                    <div className="detail-poster">
-                        <img src={data.image_url || data.large_image_url || ""} alt={data.title} />
-                    </div>
-
-                    <div className="detail-info">
-                        <h2 className="detail-title">{data.title_english || data.title}</h2>
-                        {data.title_japanese && (
-                            <p className="detail-subtitle">{data.title_japanese}</p>
-                        )}
-
-                        <div className="detail-meta">
-                            {data.score && <span className="detail-meta-item detail-meta-score">★ {data.score}</span>}
-                            {data.type && <span className="detail-meta-item">{data.type}</span>}
-                            {data.episodes && <span className="detail-meta-item">{data.episodes} episodes</span>}
-                            {data.status && <span className="detail-meta-item">{data.status}</span>}
-                            {detail?.duration && <span className="detail-meta-item">{detail.duration}</span>}
-                            {detail?.aired && <span className="detail-meta-item">{detail.aired}</span>}
-                            {data.rating && <span className="detail-meta-item">{data.rating}</span>}
+                    <div className="detail-main">
+                        <div className="detail-poster">
+                            <img src={data.image_url || data.large_image_url || ""} alt={data.title} />
                         </div>
 
-                        {/* Action Buttons */}
-                        <div className="detail-actions">
-                            <button
-                                className={`detail-action-btn detail-favorite-btn ${favorited ? "active" : ""}`}
-                                onClick={handleFavoriteToggle}
-                            >
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill={favorited ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
-                                    <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" />
-                                </svg>
-                                {favorited ? "Favorited" : "Favorite"}
-                            </button>
+                        <div className="detail-info">
+                            <h2 className="detail-title">{data.title_english || data.title}</h2>
+                            {data.title_japanese && (
+                                <p className="detail-subtitle">{data.title_japanese}</p>
+                            )}
 
-                            <div className="detail-watchlist-wrapper">
-                                <button
-                                    className={`detail-action-btn detail-watchlist-btn ${watchlistStatus ? "active" : ""}`}
-                                    onClick={() => {
-                                        if (!currentUser) { onLoginClick(); return; }
-                                        setShowWatchlistMenu(!showWatchlistMenu);
+                            <div className="detail-meta">
+                                {data.score && <span className="detail-meta-item detail-meta-score">★ {data.score}</span>}
+                                {data.type && <span className="detail-meta-item">{data.type}</span>}
+                                {data.episodes && <span className="detail-meta-item">{data.episodes} episodes</span>}
+                                {data.status && <span className="detail-meta-item">{data.status}</span>}
+                                {detail?.duration && <span className="detail-meta-item">{detail.duration}</span>}
+                                {detail?.aired && <span className="detail-meta-item">{detail.aired}</span>}
+                                {data.rating && <span className="detail-meta-item">{data.rating}</span>}
+                            </div>
+
+                            <div className="detail-actions-primary" style={{ 
+                                marginBottom: "1.5rem",
+                                display: "flex",
+                                gap: "1rem"
+                            }}>
+                                <Link
+                                    href={`/watch/${animeId}/1`}
+                                    className="btn-watch-now"
+                                    style={{
+                                        display: "flex",
+                                        alignItems: "center",
+                                        gap: "0.75rem",
+                                        padding: "0.8rem 2.5rem",
+                                        background: "linear-gradient(135deg, var(--gold) 0%, #ffcc00 100%)",
+                                        color: "#000",
+                                        borderRadius: "var(--radius-full)",
+                                        fontWeight: "800",
+                                        fontSize: "1.05rem",
+                                        textTransform: "uppercase",
+                                        letterSpacing: "0.05em",
+                                        boxShadow: "0 8px 24px rgba(212, 175, 55, 0.3)",
+                                        transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+                                        border: "none",
+                                        cursor: "pointer"
                                     }}
                                 >
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                        <path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z" />
+                                    <span style={{ 
+                                        background: "rgba(0,0,0,0.1)", 
+                                        width: "28px", 
+                                        height: "28px", 
+                                        display: "flex", 
+                                        alignItems: "center", 
+                                        justifyContent: "center",
+                                        borderRadius: "50%",
+                                        fontSize: "0.9rem"
+                                    }}>▶</span>
+                                    Watch Now
+                                </Link>
+                            </div>
+
+                            <div className="detail-actions">
+                                <button
+                                    className={`detail-action-btn detail-favorite-btn ${favorited ? "active" : ""}`}
+                                    onClick={handleFavoriteToggle}
+                                >
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill={favorited ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
+                                        <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" />
                                     </svg>
-                                    {watchlistStatus
-                                        ? WATCHLIST_STATUSES.find((s) => s.value === watchlistStatus)?.label || "In List"
-                                        : "Add to List"
-                                    }
+                                    {favorited ? "Favorited" : "Favorite"}
                                 </button>
 
-                                {showWatchlistMenu && (
-                                    <div className="detail-watchlist-menu">
-                                        {WATCHLIST_STATUSES.map((s) => (
-                                            <button
-                                                key={s.value}
-                                                className={`detail-watchlist-option ${watchlistStatus === s.value ? "active" : ""}`}
-                                                onClick={() => handleWatchlistAdd(s.value)}
-                                            >
-                                                <span>{s.icon}</span>
-                                                {s.label}
-                                            </button>
-                                        ))}
-                                    </div>
-                                )}
+                                <div className="detail-watchlist-wrapper">
+                                    <button
+                                        className={`detail-action-btn detail-watchlist-btn ${watchlistStatus ? "active" : ""}`}
+                                        onClick={() => {
+                                            if (!currentUser) { onLoginClick(); return; }
+                                            setShowWatchlistMenu(!showWatchlistMenu);
+                                        }}
+                                    >
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                            <path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z" />
+                                        </svg>
+                                        {watchlistStatus
+                                            ? WATCHLIST_STATUSES.find((s) => s.value === watchlistStatus)?.label || "In List"
+                                            : "Add to List"
+                                        }
+                                    </button>
+
+                                    {showWatchlistMenu && (
+                                        <div className="detail-watchlist-menu">
+                                            {WATCHLIST_STATUSES.map((s) => (
+                                                <button
+                                                    key={s.value}
+                                                    className={`detail-watchlist-option ${watchlistStatus === s.value ? "active" : ""}`}
+                                                    onClick={() => handleWatchlistAdd(s.value)}
+                                                >
+                                                    <span>{s.icon}</span>
+                                                    {s.label}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="detail-genres">
+                                {data.genres?.map((g) => (
+                                    <span key={g} className="detail-genre-tag">{g}</span>
+                                ))}
                             </div>
                         </div>
+                    </div>
 
-                        <div className="detail-genres">
-                            {data.genres?.map((g) => (
-                                <span key={g} className="detail-genre-tag">{g}</span>
-                            ))}
-                        </div>
-
-                        {/* Synopsis */}
+                    <div className="detail-secondary">
                         <p className="detail-synopsis">
                             {(data.synopsis || "No synopsis available.").replace(/<[^>]*>/g, "")}
                         </p>
 
-                        {/* Studios */}
                         {data.studios && data.studios.length > 0 && (
-                            <div style={{ marginBottom: "1rem" }}>
-                                <span style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>Studios: </span>
-                                <span style={{ color: "var(--gold)", fontSize: "0.85rem" }}>{data.studios.join(", ")}</span>
+                            <div className="detail-studios">
+                                <span className="detail-studios-label">Studios: </span>
+                                <span className="detail-studios-value">{data.studios.join(", ")}</span>
                             </div>
                         )}
 
-                        {/* Characters */}
                         {detail?.characters && detail.characters.length > 0 && (
                             <>
-                                <h3 className="detail-section-title">Characters</h3>
-                                <div className="detail-characters">
+                                <div className="detail-section-header">
+                                    <h3 className="detail-section-title">Characters</h3>
+                                    <div className="detail-rail-controls">
+                                        <button type="button" className="detail-rail-btn" aria-label="Previous characters" onClick={() => scrollRail(charactersRef, "left")}>
+                                            &lt;
+                                        </button>
+                                        <button type="button" className="detail-rail-btn" aria-label="Next characters" onClick={() => scrollRail(charactersRef, "right")}>
+                                            &gt;
+                                        </button>
+                                    </div>
+                                </div>
+                                <div className="detail-characters" ref={charactersRef}>
                                     {detail.characters.map((char, i) => (
                                         <div key={i} className="detail-character">
                                             {char.image_url && (
@@ -221,11 +285,20 @@ export default function AnimeDetail({ anime, isOpen, onClose, onAnimeClick, curr
                             </>
                         )}
 
-                        {/* Recommendations */}
                         {detail?.recommendations && detail.recommendations.length > 0 && (
                             <>
-                                <h3 className="detail-section-title" style={{ marginTop: "1.5rem" }}>You Might Also Like</h3>
-                                <div className="detail-recommendations">
+                                <div className="detail-section-header" style={{ marginTop: "1.5rem" }}>
+                                    <h3 className="detail-section-title">You Might Also Like</h3>
+                                    <div className="detail-rail-controls">
+                                        <button type="button" className="detail-rail-btn" aria-label="Previous recommendations" onClick={() => scrollRail(recommendationsRef, "left")}>
+                                            &lt;
+                                        </button>
+                                        <button type="button" className="detail-rail-btn" aria-label="Next recommendations" onClick={() => scrollRail(recommendationsRef, "right")}>
+                                            &gt;
+                                        </button>
+                                    </div>
+                                </div>
+                                <div className="detail-recommendations" ref={recommendationsRef}>
                                     {detail.recommendations.map((rec) => (
                                         <AnimeCard
                                             key={rec.id}
@@ -238,11 +311,21 @@ export default function AnimeDetail({ anime, isOpen, onClose, onAnimeClick, curr
                                 </div>
                             </>
                         )}
-                        {/* ML-Powered Similar Anime */}
+
                         {similarAnime.length > 0 && (
                             <div className="similar-anime-section">
-                                <h3 className="detail-section-title">🧠 AI Recommends (ML-powered)</h3>
-                                <div className="similar-anime-grid">
+                                <div className="detail-section-header">
+                                    <h3 className="detail-section-title">🧠 AI Recommends (ML-powered)</h3>
+                                    <div className="detail-rail-controls">
+                                        <button type="button" className="detail-rail-btn" aria-label="Previous AI recommendations" onClick={() => scrollRail(similarRef, "left")}>
+                                            &lt;
+                                        </button>
+                                        <button type="button" className="detail-rail-btn" aria-label="Next AI recommendations" onClick={() => scrollRail(similarRef, "right")}>
+                                            &gt;
+                                        </button>
+                                    </div>
+                                </div>
+                                <div className="similar-anime-grid" ref={similarRef}>
                                     {similarAnime.map((sim: any) => (
                                         <AnimeCard
                                             key={sim.id}
@@ -257,7 +340,7 @@ export default function AnimeDetail({ anime, isOpen, onClose, onAnimeClick, curr
                 </div>
 
                 {/* Trailer — full-width, outside the grid */}
-                {youtubeEmbedUrl && (
+                {isOpen && youtubeEmbedUrl && (
                     <div className="detail-trailer">
                         <iframe
                             src={youtubeEmbedUrl}
@@ -269,7 +352,7 @@ export default function AnimeDetail({ anime, isOpen, onClose, onAnimeClick, curr
                 )}
 
                 {/* Comments Section */}
-                {!loading && (
+                {!loading && isOpen && (
                     <div className="detail-comments-wrapper">
                         <CommentSection
                             animeId={animeId}

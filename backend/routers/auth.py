@@ -26,6 +26,11 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class UpdateProfileRequest(BaseModel):
+    username: str
+    email: EmailStr
+
+
 @router.post("/register")
 async def register(req: RegisterRequest):
     """Register a new user."""
@@ -129,7 +134,58 @@ async def get_me(current_user: dict = Depends(get_current_user)):
     }
 
 
-MAX_AVATAR_SIZE = 500 * 1024  # 500KB
+@router.put("/me")
+async def update_me(
+    req: UpdateProfileRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Update basic user profile settings."""
+    if len(req.username.strip()) < 3:
+        raise HTTPException(status_code=400, detail="Username must be at least 3 characters")
+
+    db = get_db()
+    user_id = current_user["sub"]
+    normalized_username = req.username.strip()
+    normalized_email = req.email.strip().lower()
+
+    existing = await db["users"].find_one({
+        "_id": {"$ne": ObjectId(user_id)},
+        "$or": [
+            {"username": normalized_username},
+            {"email": normalized_email},
+        ]
+    })
+    if existing:
+        raise HTTPException(status_code=409, detail="Email or username already taken")
+
+    await db["users"].update_one(
+        {"_id": ObjectId(user_id)},
+        {"$set": {
+            "username": normalized_username,
+            "email": normalized_email,
+        }}
+    )
+
+    watchlist_count = await db["watchlist"].count_documents({"user_id": user_id})
+    favorites_count = await db["favorites"].count_documents({"user_id": user_id})
+    comments_count = await db["comments"].count_documents({"user_id": user_id})
+
+    user = await db["users"].find_one({"_id": ObjectId(user_id)})
+    return {
+        "id": str(user["_id"]),
+        "username": user["username"],
+        "email": user["email"],
+        "avatar_url": user.get("avatar_url"),
+        "created_at": user.get("created_at"),
+        "stats": {
+            "watchlist": watchlist_count,
+            "favorites": favorites_count,
+            "comments": comments_count,
+        },
+    }
+
+
+MAX_AVATAR_SIZE = 8 * 1024 * 1024  # 8MB
 ALLOWED_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
 
 
@@ -144,7 +200,7 @@ async def upload_avatar(
 
     contents = await file.read()
     if len(contents) > MAX_AVATAR_SIZE:
-        raise HTTPException(status_code=400, detail="Image must be under 500KB")
+        raise HTTPException(status_code=400, detail="Image must be under 8MB before compression")
 
     # Convert to base64 data URL
     b64 = base64.b64encode(contents).decode("utf-8")

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { searchByScreenshot } from "@/lib/api";
 import type { ScreenshotResult } from "@/lib/types";
 
@@ -9,6 +9,7 @@ interface ScreenshotSearchProps {
 }
 
 export default function ScreenshotSearch({ isVisible }: ScreenshotSearchProps) {
+    const MIN_SIMILARITY = 90;
     const [results, setResults] = useState<ScreenshotResult[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -29,9 +30,12 @@ export default function ScreenshotSearch({ isVisible }: ScreenshotSearchProps) {
 
         try {
             const data = await searchByScreenshot(file);
-            setResults(data.results || []);
-            if (!data.results?.length) {
-                setError("No matches found. Try a clearer screenshot!");
+            const filteredResults = (data.results || []).filter(
+                (result) => result.similarity >= MIN_SIMILARITY
+            );
+            setResults(filteredResults);
+            if (!filteredResults.length) {
+                setError("No high-confidence matches found. Try a clearer scene screenshot.");
             }
         } catch (err) {
             setError("Search failed. Please try again.");
@@ -53,6 +57,29 @@ export default function ScreenshotSearch({ isVisible }: ScreenshotSearchProps) {
 
     const handleBrowse = () => fileInputRef.current?.click();
 
+    useEffect(() => {
+        if (!isVisible) return;
+
+        const handlePaste = (event: ClipboardEvent) => {
+            const items = event.clipboardData?.items;
+            if (!items) return;
+
+            for (const item of items) {
+                if (!item.type.startsWith("image/")) continue;
+
+                const file = item.getAsFile();
+                if (!file) continue;
+
+                event.preventDefault();
+                void handleFile(file);
+                return;
+            }
+        };
+
+        window.addEventListener("paste", handlePaste);
+        return () => window.removeEventListener("paste", handlePaste);
+    }, [handleFile, isVisible]);
+
     const getSimilarityClass = (sim: number) => {
         if (sim >= 85) return "high";
         if (sim >= 60) return "medium";
@@ -70,9 +97,12 @@ export default function ScreenshotSearch({ isVisible }: ScreenshotSearchProps) {
 
     return (
         <section className="screenshot-section container" id="screenshot-section">
-            <h2 className="section-heading">📸 Screenshot Search</h2>
+            <h2 className="section-heading">Screenshot Search</h2>
             <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem", marginBottom: "1.5rem" }}>
                 Upload an anime screenshot and we&apos;ll identify the exact anime, episode, and timestamp using trace.moe
+            </p>
+            <p style={{ color: "var(--text-muted)", fontSize: "0.78rem", marginTop: "-0.8rem", marginBottom: "1.5rem" }}>
+                Best results come from actual anime scene frames. Posters, key visuals, cropped art, and edits are usually inaccurate.
             </p>
 
             <div
@@ -82,12 +112,12 @@ export default function ScreenshotSearch({ isVisible }: ScreenshotSearchProps) {
                 onDrop={handleDrop}
                 onClick={handleBrowse}
             >
-                <div className="screenshot-dropzone-icon">🖼️</div>
+                <div className="screenshot-dropzone-icon">Image</div>
                 <p className="screenshot-dropzone-text">
-                    Drag & drop an anime screenshot here
+                    Drag and drop an anime screenshot here
                 </p>
                 <p className="screenshot-dropzone-hint">
-                    or click to browse • Supports PNG, JPG, WebP
+                    or click to browse / press Ctrl+V - Supports PNG, JPG, WebP
                 </p>
                 <input
                     ref={fileInputRef}
@@ -116,7 +146,7 @@ export default function ScreenshotSearch({ isVisible }: ScreenshotSearchProps) {
 
             {error && !loading && (
                 <div className="empty-state" style={{ padding: "2rem" }}>
-                    <div className="empty-state-icon">😿</div>
+                    <div className="empty-state-icon">?</div>
                     <p className="empty-state-text">{error}</p>
                 </div>
             )}
@@ -128,11 +158,12 @@ export default function ScreenshotSearch({ isVisible }: ScreenshotSearchProps) {
                         <div key={i} className="screenshot-result-card">
                             <div className="screenshot-result-info">
                                 <h4 className="screenshot-result-title">
-                                    {result.title || `AniList ID: ${result.anilist_id}`}
+                                    {result.title_english || result.title || `AniList ID: ${result.anilist_id}`}
                                 </h4>
                                 <div className="screenshot-result-details">
                                     {result.episode && <span>Episode {result.episode}</span>}
                                     <span>Timestamp: {formatTimestamp(result.timestamp_from)}</span>
+                                    {result.anilist_id && <span>AniList ID: {result.anilist_id}</span>}
                                 </div>
                                 <span className={`screenshot-similarity ${getSimilarityClass(result.similarity)}`}>
                                     {result.similarity}% match

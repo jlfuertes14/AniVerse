@@ -5,11 +5,27 @@ Main anime endpoints: search, trending, top, details, seasonal, vibes.
 from fastapi import APIRouter, Query
 import httpx
 from typing import Optional
-from backend.services import jikan_service, anilist_service
+from backend.services import jikan_service, anilist_service, animepahe_service, schedule_service
 from backend.services.vibe_engine import get_all_vibes, search_by_vibe
 from backend.models.schemas import AnimeResult
 
 router = APIRouter(prefix="/anime", tags=["anime"])
+
+
+@router.get("/latest")
+async def get_latest():
+    """Get latest releases from AnimePahe."""
+    return await animepahe_service.get_latest_releases()
+
+
+@router.get("/schedule")
+async def get_schedule(refresh: bool = False):
+    """Get the weekly airing schedule."""
+    if refresh:
+        await schedule_service.refresh_airing_schedule(force=True)
+    
+    schedule = await schedule_service.get_airing_schedule()
+    return schedule or {}
 
 
 def _title_relevance(anime: AnimeResult, query: str) -> int:
@@ -68,39 +84,52 @@ async def search_anime(
     year_to: Optional[int] = Query(None, description="End year"),
     status: Optional[str] = Query(None, description="airing, complete, upcoming"),
     rating: Optional[str] = Query(None, description="g, pg, pg13, r17, r, rx"),
+    type: Optional[str] = Query(None, description="tv, movie, ova, special, ona, music"),
     page: int = Query(1, ge=1),
 ):
     """Search anime with text query, vibe preset, or advanced filters."""
-    # Vibe-based search
-    if vibe:
-        return await search_by_vibe(vibe, page=page)
+    try:
+        # Vibe-based search
+        if vibe:
+            return await search_by_vibe(vibe, page=page)
 
-    # Text search or filtered search via Jikan
-    start_date = f"{year_from}-01-01" if year_from else None
-    end_date = f"{year_to}-12-31" if year_to else None
+        # Text search or filtered search via Jikan
+        start_date = f"{year_from}-01-01" if year_from else None
+        end_date = f"{year_to}-12-31" if year_to else None
 
-    results = await jikan_service.search_anime(
-        query=q,
-        genres=genres,
-        producers=studios,
-        status=status,
-        rating=rating,
-        start_date=start_date,
-        end_date=end_date,
-        page=page,
-    )
+        results = await jikan_service.search_anime(
+            query=q,
+            genres=genres,
+            producers=studios,
+            type_filter=type,
+            status=status,
+            rating=rating,
+            start_date=start_date,
+            end_date=end_date,
+            page=page,
+        )
 
-    # If text query, rank by title relevance and filter weak matches
-    if q and results.get("data"):
-        scored = [(anime, _title_relevance(anime, q)) for anime in results["data"]]
-        # Filter out results with no title word match (score 0)
-        scored = [(a, s) for a, s in scored if s > 0]
-        # Sort by relevance score (desc), then by anime score (desc)
-        scored.sort(key=lambda x: (x[1], x[0].score or 0), reverse=True)
-        results["data"] = [a for a, s in scored]
-        results["total"] = len(results["data"])
+        # If text query, rank by title relevance and filter weak matches
+        if results.get("data"):
+            # Strict type filtering (Jikan sometimes leaks types, especially in mixed searches)
+            if type:
+                target_type = type.lower()
+                results["data"] = [a for a in results["data"] if a.type and a.type.lower() == target_type]
+            
+            if q:
+                scored = [(anime, _title_relevance(anime, q)) for anime in results["data"]]
+                # Filter out results with no title word match (score 0)
+                scored = [(a, s) for a, s in scored if s > 0]
+                # Sort by relevance score (desc), then by anime score (desc)
+                scored.sort(key=lambda x: (x[1], x[0].score or 0), reverse=True)
+                results["data"] = [a for a, s in scored]
+            
+            results["total"] = len(results["data"])
 
-    return results
+        return results
+    except Exception as e:
+        print(f"[Search] Failed: {e}")
+        return {"data": [], "total": 0, "has_next": False, "page": page}
 
 
 @router.get("/trending")
@@ -108,7 +137,7 @@ async def get_trending(page: int = Query(1, ge=1)):
     """Get currently trending anime from AniList."""
     try:
         return await anilist_service.get_trending(page=page)
-    except (httpx.HTTPStatusError, httpx.ConnectError, httpx.ReadTimeout) as e:
+    except Exception as e:
         print(f"[AniList] Trending failed: {e}")
         return {"data": [], "total": 0, "has_next": False, "page": page}
 
@@ -119,7 +148,11 @@ async def get_top(
     filter: Optional[str] = Query(None, description="airing, upcoming, bypopularity, favorite"),
 ):
     """Get top rated anime from Jikan."""
-    return await jikan_service.get_top_anime(page=page, filter_type=filter)
+    try:
+        return await jikan_service.get_top_anime(page=page, filter_type=filter)
+    except Exception as e:
+        print(f"[Jikan] Top failed: {e}")
+        return {"data": [], "total": 0, "has_next": False, "page": page}
 
 
 @router.get("/spotlight")
@@ -127,7 +160,7 @@ async def get_spotlight():
     """Get spotlight anime for hero section."""
     try:
         return await anilist_service.get_spotlight(count=5)
-    except (httpx.HTTPStatusError, httpx.ConnectError, httpx.ReadTimeout) as e:
+    except Exception as e:
         print(f"[AniList] Spotlight failed: {e}")
         return []
 

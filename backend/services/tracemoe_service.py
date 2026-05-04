@@ -4,8 +4,27 @@ Reverse image search to find anime from screenshots.
 """
 import httpx
 from backend.models.schemas import ScreenshotResult
+from backend.services import anilist_service
 
 TRACE_MOE_URL = "https://api.trace.moe/search"
+
+
+async def _resolve_anime_metadata(anilist_id: int | None) -> dict:
+    if not anilist_id:
+        return {}
+
+    try:
+        detail = await anilist_service.get_anime_detail(anilist_id)
+        if isinstance(detail, dict):
+            return {
+                "title": detail.get("title"),
+                "title_english": detail.get("title_english"),
+                "mal_id": detail.get("mal_id"),
+            }
+    except Exception:
+        pass
+
+    return {}
 
 
 async def search_by_image(image_bytes: bytes) -> list[ScreenshotResult]:
@@ -22,6 +41,7 @@ async def search_by_image(image_bytes: bytes) -> list[ScreenshotResult]:
     results = []
     for item in data.get("result", [])[:5]:
         anilist_id = item.get("anilist")
+        resolved = await _resolve_anime_metadata(anilist_id)
 
         # Build preview URLs
         filename = item.get("filename", "")
@@ -33,7 +53,9 @@ async def search_by_image(image_bytes: bytes) -> list[ScreenshotResult]:
 
         results.append(ScreenshotResult(
             anilist_id=anilist_id,
-            title=item.get("filename", "").split("/")[0] if "/" in item.get("filename", "") else None,
+            mal_id=resolved.get("mal_id"),
+            title=resolved.get("title") or (item.get("filename", "").split("/")[0] if "/" in item.get("filename", "") else None),
+            title_english=resolved.get("title_english"),
             episode=episode if isinstance(episode, int) else None,
             timestamp_from=item.get("from"),
             timestamp_to=item.get("to"),
@@ -58,12 +80,15 @@ async def search_by_url(image_url: str) -> list[ScreenshotResult]:
     results = []
     for item in data.get("result", [])[:5]:
         anilist_id = item.get("anilist")
+        resolved = await _resolve_anime_metadata(anilist_id)
         filename = item.get("filename", "")
         timestamp = item.get("from", 0)
 
         results.append(ScreenshotResult(
             anilist_id=anilist_id,
-            title=filename.split("/")[0] if "/" in filename else None,
+            mal_id=resolved.get("mal_id"),
+            title=resolved.get("title") or (filename.split("/")[0] if "/" in filename else None),
+            title_english=resolved.get("title_english"),
             episode=item.get("episode") if isinstance(item.get("episode"), int) else None,
             timestamp_from=item.get("from"),
             timestamp_to=item.get("to"),

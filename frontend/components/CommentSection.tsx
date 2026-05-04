@@ -7,11 +7,12 @@ import type { User } from "@/lib/auth";
 
 interface CommentSectionProps {
     animeId: number;
+    episode?: number;
     currentUser: User | null;
     onLoginClick: () => void;
 }
 
-export default function CommentSection({ animeId, currentUser, onLoginClick }: CommentSectionProps) {
+export default function CommentSection({ animeId, episode = 0, currentUser, onLoginClick }: CommentSectionProps) {
     const [comments, setComments] = useState<Comment[]>([]);
     const [newComment, setNewComment] = useState("");
     const [loading, setLoading] = useState(true);
@@ -19,11 +20,11 @@ export default function CommentSection({ animeId, currentUser, onLoginClick }: C
 
     useEffect(() => {
         loadComments();
-    }, [animeId]);
+    }, [animeId, episode]);
 
     const loadComments = async () => {
         try {
-            const data = await getComments(animeId);
+            const data = await getComments(animeId, episode);
             setComments(data);
         } catch (err) {
             console.error("Failed to load comments:", err);
@@ -38,7 +39,7 @@ export default function CommentSection({ animeId, currentUser, onLoginClick }: C
         setSubmitting(true);
 
         try {
-            const comment = await addComment(animeId, newComment.trim());
+            const comment = await addComment(animeId, newComment.trim(), episode);
             // Add username from current user since backend may not return it immediately
             comment.user = comment.user || {
                 id: currentUser!.id,
@@ -64,23 +65,63 @@ export default function CommentSection({ animeId, currentUser, onLoginClick }: C
         }
     };
 
+    const [now, setNow] = useState<number | null>(null);
+
+    useEffect(() => {
+        setNow(Date.now());
+        const interval = setInterval(() => {
+            setNow(Date.now());
+        }, 60000); // Update every minute
+        return () => clearInterval(interval);
+    }, []);
+
+    const parseCommentDate = (dateStr: string) => {
+        if (!dateStr) return null;
+        const hasTimezone = /[zZ]|[+-]\d{2}:\d{2}$/.test(dateStr);
+        const normalized = hasTimezone ? dateStr : `${dateStr}Z`;
+        const parsed = new Date(normalized);
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
+    };
+
+    const getYearInPH = (date: Date) => Number(
+        new Intl.DateTimeFormat("en-PH", { timeZone: "Asia/Manila", year: "numeric" }).format(date)
+    );
+
     const timeAgo = (dateStr: string) => {
-        if (!dateStr) return "just now";
-        const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
+        if (!dateStr || now === null) return "just now";
+        const date = parseCommentDate(dateStr);
+        if (!date) return "just now";
+        const seconds = Math.floor((now - date.getTime()) / 1000);
+
         if (seconds < 60) return "just now";
         if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
         if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-        return `${Math.floor(seconds / 86400)}d ago`;
+        if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`;
+        
+        // Return actual date if older than a week
+        const nowDate = new Date(now);
+        const currentYear = getYearInPH(nowDate);
+        const parsedYear = getYearInPH(date);
+
+        return date.toLocaleDateString("en-PH", {
+            timeZone: "Asia/Manila",
+            month: "short",
+            day: "numeric",
+            year: parsedYear !== currentYear ? "numeric" : undefined
+        });
     };
 
     return (
         <div className="comment-section">
-            <h3 className="comment-title">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
-                </svg>
-                Discussion ({comments.length})
-            </h3>
+            <div className="comment-header">
+                <h3 className="comment-title">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+                    </svg>
+                    Discussion
+                </h3>
+                <span className="comment-count">{comments.length} {comments.length === 1 ? "comment" : "comments"}</span>
+            </div>
 
             {/* Comment Input */}
             {currentUser ? (
@@ -129,14 +170,23 @@ export default function CommentSection({ animeId, currentUser, onLoginClick }: C
                 </div>
             ) : comments.length === 0 ? (
                 <div className="comment-empty">
-                    No comments yet. Be the first to share your thoughts!
+                    <div className="comment-empty-icon">✦</div>
+                    <p>No comments yet. Be the first to share your thoughts.</p>
                 </div>
             ) : (
                 <div className="comment-list">
                     {comments.map((comment) => (
                         <div key={comment.id} className="comment-item">
                             <div className="comment-avatar">
-                                {comment.user.username[0].toUpperCase()}
+                                {comment.user.avatar_url ? (
+                                    <img
+                                        src={comment.user.avatar_url}
+                                        alt={comment.user.username}
+                                        className="comment-avatar-img"
+                                    />
+                                ) : (
+                                    comment.user.username[0].toUpperCase()
+                                )}
                             </div>
                             <div className="comment-body">
                                 <div className="comment-meta">

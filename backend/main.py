@@ -3,16 +3,22 @@ Anime Discovery Engine — FastAPI Backend
 Main application entry point.
 """
 import asyncio
+import os
+import sys
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
+
+# Fix for Windows: Playwright (and subprocesses) require ProactorEventLoop
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 load_dotenv()  # Load .env before anything else
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.routers import anime, screenshot, filters, ai, auth, user, comments
-from backend.services import recommendation_engine
+from backend.routers import anime, screenshot, filters, ai, auth, user, comments, streaming, banners
+from backend.services import animepahe_service, recommendation_engine, schedule_service
 from backend.database import init_db
 
 
@@ -21,8 +27,15 @@ async def lifespan(app: FastAPI):
     """Initialize database and build recommendation model on startup."""
     await init_db()
     print("[AI] Building recommendation model in background...")
-    asyncio.create_task(recommendation_engine.build_model(count=200))
+    recommendation_task = asyncio.create_task(recommendation_engine.build_model(count=200))
+    scheduler_task = asyncio.create_task(animepahe_service.animepahe_catalog_scheduler())
+    latest_releases_task = asyncio.create_task(animepahe_service.latest_releases_scheduler())
+    schedule_task = asyncio.create_task(schedule_service.schedule_scheduler())
     yield
+    recommendation_task.cancel()
+    scheduler_task.cancel()
+    latest_releases_task.cancel()
+    schedule_task.cancel()
     print("[AI] Shutting down.")
 
 
@@ -50,6 +63,8 @@ app.include_router(ai.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(user.router, prefix="/api/v1")
 app.include_router(comments.router, prefix="/api/v1")
+app.include_router(streaming.router, prefix="/api/v1")
+app.include_router(banners.router, prefix="/api/v1")
 
 
 @app.get("/")
@@ -70,6 +85,7 @@ async def root():
             "ai_search": "/api/v1/ai/search",
             "ai_similar": "/api/v1/ai/similar/{anime_id}",
             "ai_status": "/api/v1/ai/status",
+            "stream": "/api/v1/stream/{mal_id}/{ep_number}",
         },
     }
 

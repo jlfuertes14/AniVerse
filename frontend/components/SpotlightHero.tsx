@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 import type { Anime } from "@/lib/types";
 
 interface SpotlightHeroProps {
@@ -88,9 +89,24 @@ export default function SpotlightHero({ spotlightAnime, onExplore, onDetail }: S
                         </p>
 
                         <div className="spotlight-actions">
-                            <button className="btn-explore" onClick={() => onExplore(anime)}>
-                                ▶ Explore
-                            </button>
+                            <Link 
+                                href={`/watch/${anime.mal_id || anime.id}/1`} 
+                                className="btn-explore"
+                                style={{
+                                    background: "linear-gradient(135deg, var(--gold) 0%, #ffcc00 100%)",
+                                    color: "#000",
+                                    padding: "0.8rem 2rem",
+                                    borderRadius: "var(--radius-full)",
+                                    fontWeight: "800",
+                                    boxShadow: "0 8px 24px rgba(212, 175, 55, 0.4)",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "0.5rem",
+                                    transition: "all 0.3s ease"
+                                }}
+                            >
+                                <span style={{ fontSize: "1.2rem" }}>▶</span> Watch Now
+                            </Link>
                             <button className="btn-detail" onClick={() => onDetail(anime)}>
                                 Detail ▸
                             </button>

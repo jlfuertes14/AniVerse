@@ -26,6 +26,7 @@ class AnimeResult(BaseModel):
     type: Optional[str] = None  # TV, Movie, OVA, etc.
     genres: list[str] = []
     studios: list[str] = []
+    relation: Optional[str] = None
     source: str = "jikan"  # "jikan" or "anilist"
 
 
@@ -56,6 +57,48 @@ class ScreenshotResult(BaseModel):
     similarity: float
     image_url: Optional[str] = None
     video_url: Optional[str] = None
+
+
+class EpisodeBase(BaseModel):
+    """Streaming episode metadata stored in the DB."""
+    ep_number: int
+    source_id: str
+    provider: str
+
+
+class SubtitleTrack(BaseModel):
+    """Subtitle track metadata."""
+    url: str
+    label: str
+    lang: str
+
+
+class CatalogStatus(BaseModel):
+    """Freshness and schedule metadata for a streaming provider."""
+    provider: str
+    latest_episode: Optional[int] = None
+    last_checked_at: Optional[str] = None
+    is_refreshing: bool = False
+    is_stale: bool = False
+    provider_status: Optional[str] = None
+    is_airing: Optional[bool] = None
+    last_success_at: Optional[str] = None
+    last_scrape_error: Optional[str] = None
+    last_scrape_duration_ms: Optional[int] = None
+    next_airing_episode: Optional[int] = None
+    next_airing_at: Optional[str] = None
+
+
+class StreamResponse(BaseModel):
+    """Resolved stream response for a specific episode."""
+    mal_id: int
+    ep_number: int
+    embed_url: Optional[str] = None  # Legacy iframe support
+    stream_url: Optional[str] = None  # Native HLS support
+    subtitles: list[SubtitleTrack] = []
+    provider: str
+    available_episodes: Optional[int] = None
+    catalog_status: Optional[CatalogStatus] = None
 
 
 class VibePreset(BaseModel):
