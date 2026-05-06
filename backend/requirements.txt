@@ -12,3 +12,4 @@ motor
 bcrypt
 python-jose[cryptography]
 playwright
+groq
