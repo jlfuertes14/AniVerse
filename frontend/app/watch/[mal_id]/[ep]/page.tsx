@@ -1,5 +1,6 @@
 import Link from "next/link";
 import StreamPendingRefresher from "@/components/StreamPendingRefresher";
+import StreamNotFoundRefresher from "@/components/StreamNotFoundRefresher";
 import WatchNavbar from "@/components/WatchNavbar";
 import WatchPlaybackClient from "@/components/WatchPlaybackClient";
 import WatchCommunity from "@/components/WatchCommunity";
@@ -116,21 +117,7 @@ export default async function WatchPage({ params }: { params: Promise<{ mal_id: 
             <>
                 <WatchNavbar />
                 <main className="watch-page" suppressHydrationWarning={true}>
-                    <div className="watch-empty-container">
-                        <div className="watch-empty-icon">
-                            <svg viewBox="0 0 24 24" width="48" height="48" fill="currentColor">
-                                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
-                            </svg>
-                        </div>
-                        <h2 className="watch-empty-title">Episode Not Found</h2>
-                        <p className="watch-empty-text">
-                            This episode hasn&apos;t been uploaded to our servers yet. 
-                            Please check back later or try a different source.
-                        </p>
-                        <Link href={`/watch/${mal_id}/1`} className="watch-empty-btn">
-                            Go to Episode 1
-                        </Link>
-                    </div>
+                    <StreamNotFoundRefresher malId={mal_id} />
                 </main>
             </>
         );

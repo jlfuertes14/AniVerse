@@ -173,6 +173,21 @@ async def get_episode_stream(mal_id: int, ep_number: int, background_tasks: Back
         )
         available_episodes = int(mapping.get("latest_episode", 0)) if mapping else 0
 
+        if is_animepahe_refresh_in_progress(mal_id):
+            pending_catalog_status = _build_catalog_status(mapping or animepahe_mapping, "animepahe")
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "detail": "AnimePahe stream is being fetched. Please refresh in a few seconds.",
+                    "mal_id": mal_id,
+                    "ep_number": ep_number,
+                    "status": "pending",
+                    "provider": "animepahe",
+                    "available_episodes": available_episodes,
+                    "catalog_status": pending_catalog_status.model_dump() if pending_catalog_status else None,
+                }
+            )
+
         if not should_refresh:
             raise HTTPException(
                 status_code=404, 
