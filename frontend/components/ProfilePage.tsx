@@ -148,6 +148,14 @@ export default function ProfilePage() {
         router.push(`/?${params.toString()}`);
     }, [router]);
 
+    const handleNavAISearch = useCallback(() => {
+        const input = document.getElementById("search-input") as HTMLInputElement;
+        const q = input?.value || "";
+        const params = new URLSearchParams();
+        if (q) params.set("ai_q", q);
+        router.push(`/?${params.toString()}`);
+    }, [router]);
+
     const handleNavFilterToggle = useCallback(() => {
         router.push("/?filter=1");
     }, [router]);
@@ -274,6 +282,7 @@ export default function ProfilePage() {
             onScreenshotClick={handleNavScreenshot}
             onRandomClick={handleNavRandom}
             onVibesClick={handleNavVibes}
+            onAISearchClick={handleNavAISearch}
             onLogoClick={() => router.push("/")}
             onLoginClick={() => router.push("/")}
             onProfileClick={() => router.push("/profile")}

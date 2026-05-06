@@ -61,6 +61,11 @@ export default function WatchNavbar() {
                 onScreenshotClick={() => navigateHomeWithParams({ screenshot: "1" })}
                 onRandomClick={() => navigateHomeWithParams({ random: "1" })}
                 onVibesClick={() => navigateHomeWithParams({ vibes: "1" })}
+                onAISearchClick={() => {
+                    const input = document.getElementById("search-input") as HTMLInputElement;
+                    const q = input?.value || "";
+                    navigateHomeWithParams({ ai_q: q });
+                }}
                 onLogoClick={() => router.push("/")}
                 onLoginClick={() => setShowAuthModal(true)}
                 onProfileClick={() => router.push("/profile")}
