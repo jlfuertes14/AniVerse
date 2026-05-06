@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Find anime by <em>vibe</em>, not just genre.</strong><br>
-  Built with a high-performance scraping engine, Gemini AI, and a premium cinematic UI.
+  Built with a high-performance scraping engine, Groq AI, and a premium cinematic UI.
 </p>
 
 <p align="center">
