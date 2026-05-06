@@ -13,6 +13,7 @@ import ScreenshotSearch from "@/components/ScreenshotSearch";
 import AuthModal from "@/components/AuthModal";
 import SearchVibeChips from "@/components/SearchVibeChips";
 import EstimatedSchedule from "@/components/EstimatedSchedule";
+import Toast from "@/components/Toast";
 import SiteFooter from "@/components/SiteFooter";
 import {
   getBanners,
@@ -22,6 +23,7 @@ import {
   getVibes,
   getWaifuImage,
   searchAnime,
+  aiSearch,
 } from "@/lib/api";
 import { clearAuth, getStoredUser, isLoggedIn } from "@/lib/auth";
 import type { User } from "@/lib/auth";
@@ -65,6 +67,8 @@ export default function HomeClient({
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [mascotUrl, setMascotUrl] = useState("");
   const [banners, setBanners] = useState<string[]>([]);
+  const [isAIActive, setIsAIActive] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: "info" | "error" | "success" } | null>(null);
 
   useEffect(() => {
     const stored = getStoredUser();
@@ -84,6 +88,7 @@ export default function HomeClient({
     setIsSearching(true);
     setSearchLoading(true);
     setActiveVibe(null);
+    setIsAIActive(false);
     setShowScreenshot(false);
     setSearchTitle(`Search: "${query}"`);
     setPage(1);
@@ -113,6 +118,7 @@ export default function HomeClient({
     setActiveVibe(vibeId);
     setIsSearching(true);
     setSearchLoading(true);
+    setIsAIActive(false);
     setShowScreenshot(false);
     const vibe = vibes.find((item) => item.id === vibeId);
     setSearchTitle(vibe ? `${vibe.emoji} ${vibe.name}` : "Vibe Search");
@@ -142,6 +148,7 @@ export default function HomeClient({
     setIsSearching(true);
     setSearchLoading(true);
     setActiveVibe(null);
+    setIsAIActive(false);
     setShowScreenshot(false);
     setSearchTitle("Filtered Results");
     setPage(1);
@@ -172,6 +179,7 @@ export default function HomeClient({
     setIsSearching(true);
     setSearchLoading(true);
     setActiveVibe(null);
+    setIsAIActive(false);
     setShowScreenshot(false);
     setSearchTitle(type === "tv" ? "TV Series" : "Anime Movies");
     setPage(1);
@@ -214,6 +222,37 @@ export default function HomeClient({
       setLoadingMore(false);
     }
   }, [activeVibe, activeCategory, page]);
+
+  const handleAISearch = useCallback(async (query: string) => {
+    if (!query.trim()) {
+      setToast({ message: "Please enter an anime description, vibe, or character name to search with AI!", type: "info" });
+      return;
+    }
+
+    setIsSearching(true);
+    setSearchLoading(true);
+    setActiveVibe(null);
+    setIsAIActive(true);
+    setShowScreenshot(false);
+    setSearchTitle(`AI Discovery: "${query}"`);
+    setPage(1);
+
+    try {
+      const data = await aiSearch(query);
+      const results = data.results || [];
+      const uniqueResults = Array.from(new Map(results.map(a => [`${a.source}-${a.id}`, a])).values());
+      setSearchResults(uniqueResults);
+      setHasMore(false); // AI search is currently single-page
+      setActiveCategory(null);
+    } catch (err) {
+      console.error("AI Search failed:", err);
+      setToast({ message: "AI Search encountered an issue. Falling back to standard search.", type: "error" });
+      handleSearch(query);
+      setIsAIActive(false);
+    } finally {
+      setSearchLoading(false);
+    }
+  }, [handleSearch]);
 
   const handleAnimeClick = useCallback((anime: Anime) => {
     setSelectedAnime(anime);
@@ -306,6 +345,8 @@ export default function HomeClient({
         onScreenshotClick={handleScreenshotClick}
         onRandomClick={handleRandom}
         onVibesClick={handleVibesClick}
+        onAISearchClick={() => handleAISearch(document.getElementById("search-input") ? (document.getElementById("search-input") as HTMLInputElement).value : "")}
+        isAIActive={isAIActive}
         onLogoClick={handleLogoClick}
         onLoginClick={() => setShowAuthModal(true)}
         onProfileClick={() => router.push("/profile")}
@@ -389,6 +430,14 @@ export default function HomeClient({
       )}
 
       <SiteFooter backgroundImage={mascotUrl} />
+
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
+      )}
     </>
   );
 }

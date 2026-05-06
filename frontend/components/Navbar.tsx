@@ -12,12 +12,14 @@ interface NavbarProps {
     onScreenshotClick: () => void;
     onRandomClick: () => void;
     onVibesClick: () => void;
+    onLogout: () => void;
+    onAISearchClick: () => void;
     onLogoClick: () => void;
     onLoginClick: () => void;
     onProfileClick: () => void;
-    onLogout: () => void;
     onCategoryClick: (type: string) => void;
     activeCategory?: string | null;
+    isAIActive?: boolean;
     activeVibe?: string | null;
     showScreenshot?: boolean;
     isRandomActive?: boolean;
@@ -33,12 +35,14 @@ export default function Navbar({
     onScreenshotClick,
     onRandomClick,
     onVibesClick,
+    onLogout,
+    onAISearchClick,
     onLogoClick,
     onLoginClick,
     onProfileClick,
-    onLogout,
     onCategoryClick,
     activeCategory,
+    isAIActive,
     activeVibe,
     showScreenshot,
     isRandomActive,
@@ -213,6 +217,20 @@ export default function Navbar({
                 </div>
 
                 <div className="navbar-quick-actions">
+                    <button 
+                        className={`navbar-link ai-discovery-btn ${isAIActive ? "active" : ""}`} 
+                        onClick={onAISearchClick}
+                        title="AI Discovery Search"
+                    >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+                            <path d="M5 3v4" />
+                            <path d="M3 5h4" />
+                            <path d="M21 17v4" />
+                            <path d="M19 19h4" />
+                        </svg>
+                        AI Search
+                    </button>
                     <button 
                         className={`navbar-link ${activeCategory === "tv" ? "active" : ""}`} 
                         onClick={() => onCategoryClick("tv")}

@@ -89,43 +89,15 @@ async def search_anime(
 ):
     """Search anime with text query, vibe preset, or advanced filters."""
     try:
-        # 1. Vibe-based search
+        # Vibe-based search
         if vibe:
             return await search_by_vibe(vibe, page=page)
 
-        # 2. Smart NLP Detection (Optional: can be triggered by length or keywords)
-        ai_results = []
-        if q and (len(q.split()) > 3 or any(word in q.lower() for word in ["like", "similar", "about", "protagonist", "recommend"])):
-            try:
-                from backend.routers.ai import ai_search
-                # We reuse the ai_search logic but as an internal call
-                # Note: ai_search expects a body dict, but we can call it or its services
-                from backend.services import nlp_search
-                parsed = await nlp_search.parse_natural_language(q)
-                
-                if not parsed.get("error") and parsed.get("filters"):
-                    # If the AI identified something, let's use the ai_search logic
-                    # To avoid circular imports or messy code, we'll just hit the search_by_tags
-                    filters = parsed["filters"]
-                    
-                    # 2a. Search by AI-extracted tags/genres
-                    al_results = await anilist_service.search_by_tags(
-                        tags=filters.get("tags"),
-                        genres=filters.get("genres"),
-                        year_from=filters.get("year_from"),
-                        year_to=filters.get("year_to"),
-                        page=page,
-                        per_page=20
-                    )
-                    ai_results = al_results.get("data", [])
-            except Exception as e:
-                print(f"[SmartSearch] AI Fallback failed: {e}")
-
-        # 3. Standard Text search via Jikan
+        # Text search or filtered search via Jikan
         start_date = f"{year_from}-01-01" if year_from else None
         end_date = f"{year_to}-12-31" if year_to else None
 
-        jikan_results = await jikan_service.search_anime(
+        results = await jikan_service.search_anime(
             query=q,
             genres=genres,
             producers=studios,
@@ -136,50 +108,25 @@ async def search_anime(
             end_date=end_date,
             page=page,
         )
-        
-        # Merge results (AI results first for relevance)
-        results_data = ai_results
-        existing_ids = {getattr(a, 'id', None) or a.get('id') for a in results_data if a}
-        
-        for a in jikan_results.get("data", []):
-            aid = getattr(a, 'id', None) or a.get('id')
-            if aid not in existing_ids:
-                results_data.append(a)
 
-        # 4. Rank and Filter
-        if results_data:
+        # If text query, rank by title relevance and filter weak matches
+        if results.get("data"):
+            # Strict type filtering (Jikan sometimes leaks types, especially in mixed searches)
             if type:
                 target_type = type.lower()
-                results_data = [a for a in results_data if (getattr(a, 'type', None) or "").lower() == target_type]
+                results["data"] = [a for a in results["data"] if a.type and a.type.lower() == target_type]
             
-            if q and not ai_results: # Only rank if AI didn't already handle the relevance
-                scored = []
-                for anime in results_data:
-                    # Handle both AnimeResult objects and dicts
-                    if not isinstance(anime, AnimeResult):
-                        # Convert dict to temp AnimeResult for relevance check
-                        temp = AnimeResult(
-                            id=anime.get("id", 0),
-                            title=anime.get("title", ""),
-                            title_english=anime.get("title_english"),
-                            title_japanese=anime.get("title_japanese"),
-                        )
-                        score = _title_relevance(temp, q)
-                    else:
-                        score = _title_relevance(anime, q)
-                    scored.append((anime, score))
-                
+            if q:
+                scored = [(anime, _title_relevance(anime, q)) for anime in results["data"]]
+                # Filter out results with no title word match (score 0)
                 scored = [(a, s) for a, s in scored if s > 0]
-                scored.sort(key=lambda x: (x[1], getattr(x[0], 'score', 0) or x[0].get('score', 0) or 0), reverse=True)
-                results_data = [a for a, s in scored]
+                # Sort by relevance score (desc), then by anime score (desc)
+                scored.sort(key=lambda x: (x[1], x[0].score or 0), reverse=True)
+                results["data"] = [a for a in results["data"] if a]
+            
+            results["total"] = len(results["data"])
 
-        return {
-            "data": results_data[:24],
-            "total": len(results_data),
-            "has_next": jikan_results.get("has_next", False),
-            "page": page,
-            "smart_search": len(ai_results) > 0
-        }
+        return results
     except Exception as e:
         print(f"[Search] Failed: {e}")
         return {"data": [], "total": 0, "has_next": False, "page": page}

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./toast.css";
 
 export const metadata: Metadata = {
   title: "AniVerse - Watch Free Anime Online HD Streaming",
