@@ -233,6 +233,8 @@ async def get_episode_stream(mal_id: int, ep_number: int, background_tasks: Back
         if not anime:
             raise HTTPException(status_code=404, detail="Anime not found on MAL")
         
+        search_title = anime.title_english or anime.title
+
         from backend.services.animepahe_service import should_refresh_animepahe_catalog
         should_refresh, mapping = await should_refresh_animepahe_catalog(
             mal_id, 
@@ -277,7 +279,6 @@ async def get_episode_stream(mal_id: int, ep_number: int, background_tasks: Back
                 detail=f"Episode {ep_number} is not available yet. Latest found: {available_episodes}"
             )
 
-        search_title = anime.title_english or anime.title
         print(f"[Streaming] Queueing AnimePahe discovery for {mal_id} Ep {ep_number} using title: {search_title}")
         background_tasks.add_task(refresh_animepahe_catalog, mal_id, search_title, ep_number)
         await _queue_anizone_episode(db, background_tasks, mal_id, search_title, ep_number)
