@@ -1,5 +1,9 @@
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
+from pymongo import ReturnDocument
+from pymongo.errors import DuplicateKeyError
 from backend.database import get_db
 from backend.models.schemas import CatalogStatus, StreamResponse
 from backend.services.animepahe_service import (
@@ -11,6 +15,7 @@ from backend.services.animepahe_service import (
     get_animepahe_stream,
     resolve_animepahe_embed_stream,
 )
+from backend.services.anizone_service import discover_anizone_episode
 from backend.services.jikan_service import get_anime_detail
 
 router = APIRouter(prefix="/stream", tags=["streaming"])
@@ -20,6 +25,8 @@ SOURCE_PRIORITY = {
     "animepahe": 0,
     "anizone": 1,
 }
+
+ANIZONE_LOCK_TTL = timedelta(minutes=6)
 
 
 async def _resolve_and_cache_embed_stream(db, stream_id, embed_url: str):
@@ -43,6 +50,67 @@ def _sort_stream_candidates(records: list[dict]) -> list[dict]:
             SOURCE_PRIORITY.get(record.get("source", ""), 99),
         ),
     )
+
+
+async def _acquire_anizone_episode_lock(db, mal_id: int, ep_number: int) -> str | None:
+    now = datetime.now(timezone.utc)
+    expires_at = now + ANIZONE_LOCK_TTL
+    key = f"anizone:{mal_id}:{ep_number}"
+
+    refreshed = await db["refresh_locks"].find_one_and_update(
+        {
+            "key": key,
+            "$or": [
+                {"expires_at": {"$lte": now}},
+                {"expires_at": {"$exists": False}},
+            ],
+        },
+        {"$set": {
+            "provider": "anizone",
+            "mal_id": mal_id,
+            "episode": ep_number,
+            "expires_at": expires_at,
+            "updated_at": now,
+        }},
+        return_document=ReturnDocument.AFTER,
+    )
+    if refreshed:
+        return key
+
+    try:
+        await db["refresh_locks"].insert_one({
+            "key": key,
+            "provider": "anizone",
+            "mal_id": mal_id,
+            "episode": ep_number,
+            "expires_at": expires_at,
+            "created_at": now,
+        })
+        return key
+    except DuplicateKeyError:
+        return None
+
+
+async def _release_anizone_episode_lock(db, key: str | None):
+    if not key:
+        return
+    await db["refresh_locks"].delete_one({"key": key})
+
+
+async def _run_anizone_episode_discovery(db, mal_id: int, title: str, ep_number: int, key: str | None):
+    try:
+        await discover_anizone_episode(mal_id, title, ep_number)
+    finally:
+        await _release_anizone_episode_lock(db, key)
+
+
+async def _queue_anizone_episode(db, background_tasks: BackgroundTasks, mal_id: int, title: str, ep_number: int) -> bool:
+    key = await _acquire_anizone_episode_lock(db, mal_id, ep_number)
+    if not key:
+        return False
+
+    background_tasks.add_task(_run_anizone_episode_discovery, db, mal_id, title, ep_number, key)
+    return True
 
 
 async def _get_available_episode_count(db, mal_id: int, source: str | None = None) -> int:
@@ -174,6 +242,7 @@ async def get_episode_stream(mal_id: int, ep_number: int, background_tasks: Back
         available_episodes = int(mapping.get("latest_episode", 0)) if mapping else 0
 
         if is_animepahe_refresh_in_progress(mal_id):
+            await _queue_anizone_episode(db, background_tasks, mal_id, search_title, ep_number)
             pending_catalog_status = _build_catalog_status(mapping or animepahe_mapping, "animepahe")
             return JSONResponse(
                 status_code=202,
@@ -189,14 +258,29 @@ async def get_episode_stream(mal_id: int, ep_number: int, background_tasks: Back
             )
 
         if not should_refresh:
+            anizone_queued = await _queue_anizone_episode(db, background_tasks, mal_id, search_title, ep_number)
+            if anizone_queued:
+                return JSONResponse(
+                    status_code=202,
+                    content={
+                        "detail": "AniZone stream is being fetched. Please refresh in a few seconds.",
+                        "mal_id": mal_id,
+                        "ep_number": ep_number,
+                        "status": "pending",
+                        "provider": "anizone",
+                        "available_episodes": available_episodes,
+                        "catalog_status": None,
+                    }
+                )
             raise HTTPException(
-                status_code=404, 
+                status_code=404,
                 detail=f"Episode {ep_number} is not available yet. Latest found: {available_episodes}"
             )
 
         search_title = anime.title_english or anime.title
         print(f"[Streaming] Queueing AnimePahe discovery for {mal_id} Ep {ep_number} using title: {search_title}")
         background_tasks.add_task(refresh_animepahe_catalog, mal_id, search_title, ep_number)
+        await _queue_anizone_episode(db, background_tasks, mal_id, search_title, ep_number)
 
         pending_catalog_status = _build_catalog_status(mapping or animepahe_mapping, "animepahe")
         return JSONResponse(

@@ -123,8 +123,8 @@ async def anizone_search(title: str) -> dict | None:
         )
         page = await context.new_page()
         try:
-            # Correct search URL for AniZone
-            search_url = f"https://anizone.to/anime?search={title.replace(' ', '+')}"
+            # Correct search URL for AniZone (URL-encode to support Japanese titles)
+            search_url = f"https://anizone.to/anime?search={quote_plus(title)}"
             await page.goto(search_url, wait_until="networkidle", timeout=15000)
 
             # Look for any link containing '/anime/'

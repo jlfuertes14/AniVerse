@@ -20,6 +20,25 @@ from backend.models.schemas import SubtitleTrack
 SCRAPER_RUNNER = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "scraper_runner.py")
 
 
+async def _build_anizone_title_candidates(mal_id: int | None, fallback_title: str) -> list[str]:
+    candidates: list[str] = []
+    if fallback_title:
+        candidates.append(fallback_title)
+
+    if mal_id:
+        try:
+            from backend.services.jikan_service import get_anime_detail
+
+            detail = await get_anime_detail(mal_id)
+            for candidate in [detail.title, detail.title_english, detail.title_japanese]:
+                if candidate and candidate not in candidates:
+                    candidates.append(candidate)
+        except Exception as e:
+            print(f"[AniZone] Failed to load title variants for {mal_id}: {e}")
+
+    return candidates
+
+
 async def search_anizone_by_title(title: str, mal_id: int = None):
     """
     Searches AniZone for an anime by its title and returns the URL.
@@ -33,23 +52,29 @@ async def search_anizone_by_title(title: str, mal_id: int = None):
         if cached:
             return cached["url"]
 
-    print(f"[AniZone] Searching for: {title}")
-    try:
-        result = await _run_scraper_subprocess("anizone_search", {"title": title})
-        if result and result.get("url"):
-            url = result["url"]
-            print(f"[AniZone] Found: {url}")
-            
-            # Cache the mapping
-            if mal_id:
-                await db["provider_mappings"].update_one(
-                    {"mal_id": mal_id, "provider": "anizone"},
-                    {"$set": {"url": url, "title": title}},
-                    upsert=True
-                )
-            return url
-    except Exception as e:
-        print(f"[AniZone] Search error for {title}: {e}")
+    candidates = await _build_anizone_title_candidates(mal_id, title)
+    if not candidates:
+        return None
+
+    for idx, candidate in enumerate(candidates, start=1):
+        label = f"{candidate} ({idx}/{len(candidates)})" if len(candidates) > 1 else candidate
+        print(f"[AniZone] Searching for: {label}")
+        try:
+            result = await _run_scraper_subprocess("anizone_search", {"title": candidate})
+            if result and result.get("url"):
+                url = result["url"]
+                print(f"[AniZone] Found: {url}")
+
+                # Cache the mapping
+                if mal_id:
+                    await db["provider_mappings"].update_one(
+                        {"mal_id": mal_id, "provider": "anizone"},
+                        {"$set": {"url": url, "title": candidate}},
+                        upsert=True
+                    )
+                return url
+        except Exception as e:
+            print(f"[AniZone] Search error for {candidate}: {e}")
     return None
 
 

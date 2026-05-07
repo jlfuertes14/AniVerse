@@ -59,6 +59,10 @@ async def init_db():
     await db["provider_mappings"].create_index([("mal_id", 1), ("provider", 1)], unique=True)
     await db["provider_mappings"].create_index([("provider", 1), ("is_airing", 1), ("last_catalog_check_at", 1)])
 
+    # refresh_locks collection indexes (TTL-based distributed locks)
+    await db["refresh_locks"].create_index("key", unique=True)
+    await db["refresh_locks"].create_index("expires_at", expireAfterSeconds=0)
+
     for mapping in MANUAL_PROVIDER_MAPPINGS:
         await db["provider_mappings"].update_one(
             {"mal_id": mapping["mal_id"], "provider": mapping["provider"]},
