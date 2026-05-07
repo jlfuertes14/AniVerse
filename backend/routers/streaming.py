@@ -201,6 +201,7 @@ async def get_episode_stream(mal_id: int, ep_number: int, background_tasks: Back
             # kwik.cx links are embeds, not direct HLS streams
             s_url = stream_data.get("stream_url")
             e_url = stream_data.get("embed_url")
+            referer_url = stream_data.get("referer_url")
             
             if s_url and "kwik" in s_url:
                 e_url = s_url
@@ -214,6 +215,20 @@ async def get_episode_stream(mal_id: int, ep_number: int, background_tasks: Back
                     e_url,
                 )
 
+            if stream_data.get("source") == "anizone" and not referer_url:
+                anizone_mapping = await db["provider_mappings"].find_one(
+                    {"mal_id": mal_id, "provider": "anizone"},
+                    {"url": 1},
+                )
+                base_url = (anizone_mapping or {}).get("url")
+                if base_url:
+                    referer_url = f"{base_url.rstrip('/')}/{resolved_ep}"
+                    stream_data["referer_url"] = referer_url
+                    await db["streams"].update_one(
+                        {"_id": stream_data["_id"]},
+                        {"$set": {"referer_url": referer_url}},
+                    )
+
             return StreamResponse(
                 mal_id=mal_id,
                 ep_number=resolved_ep, # Return the mapped episode number
@@ -226,7 +241,7 @@ async def get_episode_stream(mal_id: int, ep_number: int, background_tasks: Back
                     mal_id,
                     stream_data.get("source")
                 ),
-                referer_url=stream_data.get("referer_url"),
+                referer_url=referer_url,
                 catalog_status=_build_catalog_status(animepahe_mapping, "animepahe")
                 if stream_data.get("source") == "animepahe"
                 else None,
