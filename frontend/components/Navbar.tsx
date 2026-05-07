@@ -251,7 +251,7 @@ export default function Navbar({
         <>
         <nav className="navbar">
             <div className="navbar-inner" suppressHydrationWarning>
-                <div className="navbar-logo" onClick={onLogoClick}>
+                <div className="navbar-logo" onClick={onLogoClick} suppressHydrationWarning>
                     <img 
                         src="/asuna-yuuki.png" 
                         alt="AniVerse Mascot" 
@@ -275,8 +275,8 @@ export default function Navbar({
                     Menu
                 </button>
 
-                <div className="navbar-search" ref={searchRef}>
-                    <div className="navbar-search-box">
+                <div className="navbar-search" ref={searchRef} suppressHydrationWarning>
+                    <div className="navbar-search-box" suppressHydrationWarning>
                         <svg className="navbar-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <circle cx="11" cy="11" r="8" />
                             <line x1="21" y1="21" x2="16.65" y2="16.65" />
@@ -334,11 +334,11 @@ export default function Navbar({
                     )}
                 </div>
 
-                <div className="navbar-quick-actions">
+                <div className="navbar-quick-actions" suppressHydrationWarning>
                     {quickActions((handler) => handler(), "navbar-link")}
                 </div>
 
-                <div className="navbar-links">
+                <div className="navbar-links" suppressHydrationWarning>
                     <button className="navbar-link navbar-theme-btn" onClick={handleThemeToggle}>
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             {theme === "dark" ? (
@@ -410,20 +410,21 @@ export default function Navbar({
         <div
             className={`navbar-mobile-overlay ${isMobileMenuOpen ? "open" : ""}`}
             onClick={() => setIsMobileMenuOpen(false)}
+            suppressHydrationWarning
         />
         <aside
             className={`navbar-mobile-panel ${isMobileMenuOpen ? "open" : ""}`}
             ref={mobileMenuRef}
             id="navbar-mobile-panel"
         >
-            <div className="navbar-mobile-header">
-                <div className="navbar-mobile-brand">
+            <div className="navbar-mobile-header" suppressHydrationWarning>
+                <div className="navbar-mobile-brand" suppressHydrationWarning>
                     <img
                         src="/asuna-yuuki.png"
                         alt="AniVerse Mascot"
                         className="navbar-mobile-mascot"
                     />
-                    <div className="navbar-mobile-brand-copy">
+                    <div className="navbar-mobile-brand-copy" suppressHydrationWarning>
                         <span className="navbar-mobile-brand-title">AniVerse</span>
                         <span className="navbar-mobile-brand-subtitle">Discover anime faster</span>
                     </div>
@@ -437,9 +438,9 @@ export default function Navbar({
                 </button>
             </div>
 
-            <div className="navbar-mobile-section">
-                <div className="navbar-mobile-section-title">Explore</div>
-                <div className="navbar-mobile-actions">
+            <div className="navbar-mobile-section" suppressHydrationWarning>
+                <div className="navbar-mobile-section-title" suppressHydrationWarning>Explore</div>
+                <div className="navbar-mobile-actions" suppressHydrationWarning>
                     {quickActions(handleMobileAction, "navbar-mobile-link")}
                 </div>
             </div>

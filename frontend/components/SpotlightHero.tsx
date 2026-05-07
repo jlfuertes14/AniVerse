@@ -92,20 +92,9 @@ export default function SpotlightHero({ spotlightAnime, onExplore, onDetail }: S
                             <Link 
                                 href={`/watch/${anime.mal_id || anime.id}/1`} 
                                 className="btn-explore"
-                                style={{
-                                    background: "linear-gradient(135deg, var(--gold) 0%, #ffcc00 100%)",
-                                    color: "#000",
-                                    padding: "0.8rem 2rem",
-                                    borderRadius: "var(--radius-full)",
-                                    fontWeight: "800",
-                                    boxShadow: "0 8px 24px rgba(212, 175, 55, 0.4)",
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: "0.5rem",
-                                    transition: "all 0.3s ease"
-                                }}
                             >
-                                <span style={{ fontSize: "1.2rem" }}>▶</span> Watch Now
+                                <span className="btn-explore-icon">▶</span>
+                                Watch Now
                             </Link>
                             <button className="btn-detail" onClick={() => onDetail(anime)}>
                                 Detail ▸

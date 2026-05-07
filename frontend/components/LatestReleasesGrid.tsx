@@ -115,19 +115,24 @@ export default function LatestReleasesGrid({ initialReleases }: LatestReleasesGr
                             disabled={currentPage === 1}
                             className={`page-btn ${currentPage === 1 ? 'disabled' : ''}`}
                             style={{
-                                padding: '0.6rem 1.25rem',
+                                width: '40px',
+                                height: '40px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
                                 background: 'var(--bg-surface)',
                                 border: '1px solid var(--border-subtle)',
                                 borderRadius: 'var(--radius-md)',
                                 color: currentPage === 1 ? 'var(--text-muted)' : 'var(--text-primary)',
                                 opacity: currentPage === 1 ? 0.5 : 1,
                                 cursor: currentPage === 1 ? 'not-allowed' : 'pointer',
-                                fontSize: '0.9rem',
-                                fontWeight: '600',
                                 transition: 'all 0.2s ease'
                             }}
+                            title="Previous Page"
                         >
-                            Previous
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M15 18l-6-6 6-6" />
+                            </svg>
                         </button>
                         
                         <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -179,19 +184,24 @@ export default function LatestReleasesGrid({ initialReleases }: LatestReleasesGr
                             disabled={currentPage === totalPages}
                             className={`page-btn ${currentPage === totalPages ? 'disabled' : ''}`}
                             style={{
-                                padding: '0.6rem 1.25rem',
+                                width: '40px',
+                                height: '40px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
                                 background: 'var(--bg-surface)',
                                 border: '1px solid var(--border-subtle)',
                                 borderRadius: 'var(--radius-md)',
                                 color: currentPage === totalPages ? 'var(--text-muted)' : 'var(--text-primary)',
                                 opacity: currentPage === totalPages ? 0.5 : 1,
                                 cursor: currentPage === totalPages ? 'not-allowed' : 'pointer',
-                                fontSize: '0.9rem',
-                                fontWeight: '600',
                                 transition: 'all 0.2s ease'
                             }}
+                            title="Next Page"
                         >
-                            Next
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M9 18l6-6-6-6" />
+                            </svg>
                         </button>
                     </div>
                     <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>

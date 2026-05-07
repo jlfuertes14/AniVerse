@@ -122,24 +122,97 @@ export default function WatchPlaybackClient({
                     isFromLatest={isFromLatest}
                 />
 
-                <div className="watch-controls">
-                    <div className="watch-control-group">
-                        <span className="watch-control-chip active">SUB</span>
-                        <span className="watch-control-chip">Server: Auto</span>
-                        <span className="watch-control-chip">Quality: 720p</span>
-                    </div>
-                    {hasNextEpisode && (
-                        <div className="watch-control-group">
-                            <button
-                                type="button"
-                                className="watch-control-btn active"
-                                onClick={() => navigateToEpisode(currentEpisode + 1)}
-                            >
-                                Next Episode
-                            </button>
+                <div className="watch-player-meta">
+                    <div className="watch-meta-group">
+                        <div className="watch-meta-chip">
+                            <span className="icon">SUB</span> EN
                         </div>
+                        <div className="watch-meta-chip">
+                            <span className="icon">SERVER:</span> {streamData.provider.toUpperCase()}
+                        </div>
+                        <div className="watch-meta-chip">
+                            <span className="icon">QUALITY:</span> 1080P
+                        </div>
+                    </div>
+
+                    {hasNextEpisode && (
+                        <button
+                            type="button"
+                            className="watch-next-ep-btn desktop-next-btn"
+                            onClick={() => navigateToEpisode(currentEpisode + 1)}
+                        >
+                            <span className="play-icon">▶</span>
+                            NEXT EPISODE (Ep {currentEpisode + 1})
+                        </button>
                     )}
                 </div>
+
+                {/* Mobile Next Episode Button */}
+                {hasNextEpisode && (
+                    <button
+                        type="button"
+                        className="watch-next-ep-btn mobile-next-btn"
+                        onClick={() => navigateToEpisode(currentEpisode + 1)}
+                    >
+                        <span className="play-icon">▶</span>
+                        NEXT EPISODE (Ep {currentEpisode + 1})
+                    </button>
+                )}
+
+                {/* New Mobile Episode Guide */}
+                <section className="watch-ep-guide">
+                    <h3>Episode Guide</h3>
+                    <div className="watch-ep-scroll">
+                        {episodeItems.map((epNum) => (
+                            <Link
+                                key={epNum}
+                                href={`/watch/${malId}/${epNum}`}
+                                className={`watch-ep-card ${epNum === currentEpisode ? "active" : ""}`}
+                            >
+                                <div className={`watch-ep-thumb ${epNum === currentEpisode ? "active" : ""}`}>
+                                    <img src={thumbnailUrl} alt={`Episode ${epNum}`} loading="lazy" />
+                                    <div className="play-icon">▶</div>
+                                </div>
+                                <div className="watch-ep-label">Episode {epNum}</div>
+                                <div className="watch-ep-indicator"></div>
+                            </Link>
+                        ))}
+                    </div>
+                </section>
+
+                {/* New Mobile Recommendations */}
+                <section className="watch-related-mobile">
+                    <h3>YOU MIGHT ALSO LIKE</h3>
+                    <div className="watch-related-list-mobile">
+                        {relatedItems.map((item) => (
+                            <Link
+                                key={item.id}
+                                href={`/watch/${item.mal_id || item.id}/1`}
+                                className="watch-mobile-card"
+                            >
+                                <div className="watch-mobile-thumb">
+                                    <img
+                                        src={item.image_url || item.large_image_url || "/file.svg"}
+                                        alt={item.title}
+                                        loading="lazy"
+                                    />
+                                </div>
+                                <div className="watch-mobile-info">
+                                    <div className="watch-mobile-title">{item.title_english || item.title}</div>
+                                    <div className="watch-mobile-meta">
+                                        <span className="watch-mobile-genre">
+                                            [{item.type || "TV"}]
+                                        </span>
+                                        <span className="watch-mobile-rating">
+                                            ★ {(item as AnimeDetail).score || "N/A"}
+                                        </span>
+                                    </div>
+                                </div>
+                                <div className="watch-mobile-play">▶</div>
+                            </Link>
+                        ))}
+                    </div>
+                </section>
 
             </section>
 

@@ -78,34 +78,37 @@ export default function WatchCommunity({ animeId, episode = 0, title, imageUrl, 
 
                     <div className="watch-community-copy">
                         <div className="watch-community-header">
-                            <div>
+                            <div className="watch-community-titles">
                                 <h3 className="watch-community-title">{anime.title_english || anime.title}</h3>
                                 {anime.title_japanese && (
                                     <p className="watch-community-subtitle">{anime.title_japanese}</p>
                                 )}
                             </div>
-                            <button
-                                type="button"
-                                className={`watch-like-btn ${favorited ? "active" : ""}`}
-                                onClick={handleFavoriteToggle}
-                            >
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill={favorited ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
-                                    <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" />
-                                </svg>
-                                {favorited ? "Liked" : "Like"}
-                            </button>
-                        </div>
+                            
+                            <div className="watch-community-actions">
+                                <button
+                                    type="button"
+                                    className={`watch-like-btn ${favorited ? "active" : ""}`}
+                                    onClick={handleFavoriteToggle}
+                                >
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill={favorited ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
+                                        <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" />
+                                    </svg>
+                                    {favorited ? "Liked" : "Like"}
+                                </button>
 
-                        <div className="watch-community-badges">
-                            <span className="watch-badge-outline">{anime.rating || "PG-13"}</span>
-                            <span className="watch-badge-outline">HD</span>
-                            <span className="watch-badge-outline">CC</span>
-                            <span className="watch-badge-outline">
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                                    <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />
-                                    <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
-                                </svg>
-                            </span>
+                                <div className="watch-community-badges">
+                                    <span className="watch-badge-outline">{anime.rating || "PG-13"}</span>
+                                    <span className="watch-badge-outline">HD</span>
+                                    <span className="watch-badge-outline">CC</span>
+                                    <span className="watch-badge-outline">
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                                            <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />
+                                            <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
+                                        </svg>
+                                    </span>
+                                </div>
+                            </div>
                         </div>
 
                         <p className="watch-community-summary">

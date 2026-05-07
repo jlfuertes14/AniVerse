@@ -120,6 +120,7 @@ export default function AnimeDetail({ anime, isOpen, onClose, onAnimeClick, curr
             if (e.target === e.currentTarget) onClose();
         }}>
             <div className="detail-modal">
+                <button className="detail-close" onClick={onClose}>✕</button>
                 {/* Banner */}
                 <div
                     className="detail-banner"
@@ -128,7 +129,6 @@ export default function AnimeDetail({ anime, isOpen, onClose, onAnimeClick, curr
                     }}
                 >
                     <div className="detail-banner-gradient" />
-                    <button className="detail-close" onClick={onClose}>✕</button>
                 </div>
 
                 {/* Body */}
@@ -154,52 +154,20 @@ export default function AnimeDetail({ anime, isOpen, onClose, onAnimeClick, curr
                                 {data.rating && <span className="detail-meta-item">{data.rating}</span>}
                             </div>
 
-                            <div className="detail-actions-primary" style={{ 
-                                marginBottom: "1.5rem",
-                                display: "flex",
-                                gap: "1rem"
-                            }}>
+                            <div className="detail-actions">
                                 <Link
                                     href={`/watch/${animeId}/1`}
                                     className="btn-watch-now"
-                                    style={{
-                                        display: "flex",
-                                        alignItems: "center",
-                                        gap: "0.75rem",
-                                        padding: "0.8rem 2.5rem",
-                                        background: "linear-gradient(135deg, var(--gold) 0%, #ffcc00 100%)",
-                                        color: "#000",
-                                        borderRadius: "var(--radius-full)",
-                                        fontWeight: "800",
-                                        fontSize: "1.05rem",
-                                        textTransform: "uppercase",
-                                        letterSpacing: "0.05em",
-                                        boxShadow: "0 8px 24px rgba(212, 175, 55, 0.3)",
-                                        transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
-                                        border: "none",
-                                        cursor: "pointer"
-                                    }}
                                 >
-                                    <span style={{ 
-                                        background: "rgba(0,0,0,0.1)", 
-                                        width: "28px", 
-                                        height: "28px", 
-                                        display: "flex", 
-                                        alignItems: "center", 
-                                        justifyContent: "center",
-                                        borderRadius: "50%",
-                                        fontSize: "0.9rem"
-                                    }}>▶</span>
+                                    <span className="btn-watch-now-icon">▶</span>
                                     Watch Now
                                 </Link>
-                            </div>
 
-                            <div className="detail-actions">
                                 <button
                                     className={`detail-action-btn detail-favorite-btn ${favorited ? "active" : ""}`}
                                     onClick={handleFavoriteToggle}
                                 >
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill={favorited ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill={favorited ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
                                         <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" />
                                     </svg>
                                     {favorited ? "Favorited" : "Favorite"}
@@ -213,7 +181,7 @@ export default function AnimeDetail({ anime, isOpen, onClose, onAnimeClick, curr
                                             setShowWatchlistMenu(!showWatchlistMenu);
                                         }}
                                     >
-                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                             <path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z" />
                                         </svg>
                                         {watchlistStatus
