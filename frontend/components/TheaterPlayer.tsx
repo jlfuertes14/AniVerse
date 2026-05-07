@@ -32,6 +32,10 @@ function buildProxyUrl(url: string, referer?: string) {
     if (referer) {
         params.set("referer", referer);
     }
+    const apiBase = process.env.NEXT_PUBLIC_API_URL || "";
+    if (apiBase) {
+        return `${apiBase.replace(/\/$/, "")}/proxy?${params.toString()}`;
+    }
     return `/api/proxy?${params.toString()}`;
 }
 

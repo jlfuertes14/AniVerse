@@ -17,7 +17,7 @@ load_dotenv()  # Load .env before anything else
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.routers import anime, screenshot, filters, ai, auth, user, comments, streaming, banners
+from backend.routers import anime, screenshot, filters, ai, auth, user, comments, streaming, banners, proxy
 from backend.services import animepahe_service, recommendation_engine, schedule_service
 from backend.database import init_db
 
@@ -65,6 +65,7 @@ app.include_router(user.router, prefix="/api/v1")
 app.include_router(comments.router, prefix="/api/v1")
 app.include_router(streaming.router, prefix="/api/v1")
 app.include_router(banners.router, prefix="/api/v1")
+app.include_router(proxy.router, prefix="/api/v1")
 
 
 @app.get("/")
