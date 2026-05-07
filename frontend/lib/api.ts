@@ -63,9 +63,9 @@ export async function getTrending(page: number = 1): Promise<PaginatedResponse> 
     return fetchAPI<PaginatedResponse>(`/anime/trending?page=${page}`);
 }
 
-export async function getLatestReleases(): Promise<LatestRelease[]> {
-    return fetchAPI<LatestRelease[]>("/anime/latest", {
-        next: { revalidate: 600 },
+export async function getLatestReleases(prefer: string = "animepahe"): Promise<LatestRelease[]> {
+    return fetchAPI<LatestRelease[]>(`/anime/latest?prefer=${prefer}`, {
+        next: { revalidate: 300 },
     });
 }
 

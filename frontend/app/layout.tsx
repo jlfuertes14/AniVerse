@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
+import { Suspense } from "react";
 import "./globals.css";
 import "./toast.css";
+import { LoadingToastProvider } from "@/components/LoadingToastProvider";
 
 export const metadata: Metadata = {
   title: "AniVerse - Watch Free Anime Online HD Streaming",
@@ -42,7 +44,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body suppressHydrationWarning>{children}</body>
+      <body suppressHydrationWarning>
+        <Suspense fallback={children}>
+          <LoadingToastProvider>{children}</LoadingToastProvider>
+        </Suspense>
+      </body>
     </html>
   );
 }

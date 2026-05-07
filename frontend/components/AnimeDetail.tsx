@@ -1,12 +1,12 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import Link from "next/link";
 import { getAnimeDetail, getSimilarAnime, addToWatchlist, toggleFavorite, isFavorited, getWatchlistStatus } from "@/lib/api";
 import AnimeCard from "./AnimeCard";
 import CommentSection from "./CommentSection";
 import type { Anime, AnimeDetail as AnimeDetailType } from "@/lib/types";
 import type { User } from "@/lib/auth";
+import LoadingLink from "@/components/LoadingLink";
 
 interface AnimeDetailProps {
     anime: Anime | null;
@@ -155,13 +155,14 @@ export default function AnimeDetail({ anime, isOpen, onClose, onAnimeClick, curr
                             </div>
 
                             <div className="detail-actions">
-                                <Link
+                                <LoadingLink
                                     href={`/watch/${animeId}/1`}
                                     className="btn-watch-now"
+                                    loadingMessage={`Loading ${data.title_english || data.title}...`}
                                 >
                                     <span className="btn-watch-now-icon">▶</span>
                                     Watch Now
-                                </Link>
+                                </LoadingLink>
 
                                 <button
                                     className={`detail-action-btn detail-favorite-btn ${favorited ? "active" : ""}`}

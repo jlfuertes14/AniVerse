@@ -1134,6 +1134,36 @@ h6 {
   text-transform: uppercase;
 }
 
+.server-selector {
+  gap: 0.6rem !important;
+  padding-right: 0.5rem !important;
+}
+
+.server-btn {
+  font-size: 0.62rem;
+  font-weight: 800;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-muted);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.server-btn:hover:not(.active) {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.server-btn.active {
+  background: var(--gold);
+  color: #000;
+  border-color: var(--gold);
+  box-shadow: 0 0 12px rgba(212, 168, 67, 0.35);
+}
+
 .watch-meta-chip .icon {
   color: var(--gold);
   font-size: 0.65rem;

@@ -25,6 +25,7 @@ LATEST_RELEASES_REFRESH_INTERVAL = timedelta(minutes=10)
 _refresh_locks: dict[int, asyncio.Lock] = {}
 _active_refreshes: set[int] = set()
 _latest_releases_lock = asyncio.Lock()
+MAPPING_LOOKUP_DELAY_SECONDS = 0.45
 
 
 def _utc_now_iso() -> str:
@@ -143,7 +144,18 @@ async def _run_animepahe_episode_with_recovery(
         "offset": offset
     })
 
-    if session_id and _catalog_looks_poisoned(result, expected_total):
+    should_retry_without_session = False
+    if session_id:
+        if not result or not result.get("episode"):
+            should_retry_without_session = True
+            print(
+                f"[AnimePahe Service] Cached session failed to resolve episode {ep_number} "
+                f"for {title}. Retrying without session."
+            )
+        elif _catalog_looks_poisoned(result, expected_total):
+            should_retry_without_session = True
+
+    if should_retry_without_session:
         print(
             f"[AnimePahe Service] Cached AnimePahe session looks wrong for {title} "
             f"(expected ~{expected_total} eps, got {_result_episode_count(result)}). Retrying without session."
@@ -679,10 +691,18 @@ async def should_refresh_animepahe_catalog(anilist_id: int, requested_episode: i
     # If the user is requesting an episode beyond what we've found
     if requested_episode > latest_episode:
         return True, mapping
-        
+
+    is_airing = bool(mapping.get("is_airing")) if mapping else False
+
     # If we have significantly fewer episodes than Jikan/AniList says exist
-    # (e.g. we have 300 but there should be 1100), trigger a refresh to pick up the new 100-page limit
-    if expected_total > 0 and latest_episode < expected_total and latest_episode <= 300:
+    # (e.g. we have 300 but there should be 1100), trigger a refresh to pick up the new 100-page limit.
+    # Skip this for airing shows because Jikan's total is often the planned season count, not aired count.
+    if (
+        not is_airing
+        and expected_total > 0
+        and latest_episode < expected_total
+        and latest_episode <= 300
+    ):
         print(f"[AnimePahe Service] Found only {latest_episode} episodes, but expected ~{expected_total}. Forcing refresh.")
         return True, mapping
 
@@ -718,45 +738,63 @@ async def animepahe_catalog_scheduler():
         await asyncio.sleep(SCHEDULER_REFRESH_INTERVAL_SECONDS)
 
 
-async def _map_latest_release_results(result: list[dict]) -> list[dict]:
-    """Attach MAL IDs and normalize latest-release episode numbers."""
+async def _map_single_release(item: dict) -> dict:
+    """Helper to map a single release item to a MAL ID with persistent caching."""
     db = get_db()
     from backend.services import jikan_service
+    
+    title = item["title"]
+    # 1. Try finding in existing mappings first
+    existing = await db["provider_mappings"].find_one({"title": title, "provider": "animepahe"})
+    if existing:
+        item["mal_id"] = existing["mal_id"]
+    else:
+        try:
+            # 2. Not in cache, try Jikan search
+            search_res = await jikan_service.search_anime(query=title, limit=5)
+            if search_res["data"]:
+                best_match = None
+                best_score = 0.0
+                for candidate in search_res["data"]:
+                    score = max(
+                        _title_similarity_score(title, candidate.title or ""),
+                        _title_similarity_score(title, candidate.title_english or ""),
+                        _title_similarity_score(title, candidate.title_japanese or ""),
+                    )
+                    if score > best_score:
+                        best_match = candidate
+                        best_score = score
 
-    mapped_results = []
-    for item in result:
-        title = item["title"]
-        existing = await db["provider_mappings"].find_one({"title": title, "provider": "animepahe"})
-        if existing:
-            item["mal_id"] = existing["mal_id"]
-        else:
-            try:
-                # Search multiple candidates and only map when the title similarity is strong enough.
-                search_res = await jikan_service.search_anime(query=title, limit=5)
-                if search_res["data"]:
-                    best_match = None
-                    best_score = 0.0
-                    for candidate in search_res["data"]:
-                        candidate_title = candidate.title_english or candidate.title or ""
-                        score = max(
-                            _title_similarity_score(title, candidate.title or ""),
-                            _title_similarity_score(title, candidate.title_english or ""),
-                            _title_similarity_score(title, candidate.title_japanese or ""),
-                        )
-                        if score > best_score:
-                            best_match = candidate
-                            best_score = score
+                if best_match and best_score >= 0.72:
+                    mal_id = best_match.id
+                    item["mal_id"] = mal_id
+                    
+                    # 3. Cache this mapping for future instant lookups
+                    await db["provider_mappings"].update_one(
+                        {"title": title, "provider": "animepahe"},
+                        {"$set": {
+                            "title": title,
+                            "mal_id": mal_id,
+                            "session": item.get("session"),
+                            "provider": "animepahe",
+                            "last_mapped_at": datetime.now(timezone.utc).isoformat()
+                        }},
+                        upsert=True
+                    )
+        except Exception as e:
+            print(f"[AnimePahe Service] Mapping failed for {title}: {e}")
 
-                    if best_match and best_score >= 0.72:
-                        item["mal_id"] = best_match.id
-            except Exception as e:
-                print(f"[AnimePahe Service] Mapping failed for {title}: {e}")
+    # Use raw episode from provider for latest releases
+    item["display_episode"] = str(item["episode"])
+    return item
 
-        # Use raw episode from provider for latest releases to avoid Jikan rate limits
-        # The watch page / streaming router will handle seasonal offsets on-demand
-        item["display_episode"] = str(item["episode"])
-        mapped_results.append(item)
-
+async def _map_latest_release_results(result: list[dict]) -> list[dict]:
+    """Attach MAL IDs while pacing Jikan lookups to avoid provider rate limits."""
+    mapped_results: list[dict] = []
+    for index, item in enumerate(result):
+        mapped_results.append(await _map_single_release(item))
+        if index < len(result) - 1:
+            await asyncio.sleep(MAPPING_LOOKUP_DELAY_SECONDS)
     return mapped_results
 
 

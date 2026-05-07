@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 
 interface ToastProps {
   message: string;
-  type?: "info" | "error" | "success";
+  type?: "info" | "error" | "success" | "loading";
   duration?: number;
   onClose: () => void;
 }
@@ -14,18 +14,25 @@ export default function Toast({ message, type = "info", duration = 3000, onClose
 
   useEffect(() => {
     setIsVisible(true);
+    if (type === "loading") {
+      return;
+    }
+
     const timer = setTimeout(() => {
       setIsVisible(false);
       setTimeout(onClose, 300); // Wait for fade out animation
     }, duration);
 
     return () => clearTimeout(timer);
-  }, [duration, onClose]);
+  }, [duration, onClose, type]);
 
   return (
     <div className={`toast-container ${isVisible ? "visible" : ""}`}>
       <div className={`toast toast-${type}`}>
         <div className="toast-content">
+          {type === "loading" && (
+            <span className="toast-spinner" aria-hidden="true" />
+          )}
           {type === "error" && (
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="12" cy="12" r="10" />
@@ -48,12 +55,14 @@ export default function Toast({ message, type = "info", duration = 3000, onClose
           )}
           <span>{message}</span>
         </div>
-        <button className="toast-close" onClick={() => setIsVisible(false)}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
-        </button>
+        {type !== "loading" && (
+          <button className="toast-close" onClick={() => setIsVisible(false)}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        )}
       </div>
     </div>
   );

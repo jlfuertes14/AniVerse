@@ -9,10 +9,10 @@ Usage:
     python scraper_runner.py <action> <json_params>
 
 Actions:
-    anizone_search   {"title": "..."}
-    anizone_scrape   {"url": "..."}
     animepahe_full   {"title": "...", "max_episodes": 0}
     animepahe_stream {"session": "...", "episode_session": "..."}
+    reanime_search   {"title": "...", "anilist_id": 123}
+    reanime_scrape_episode {"slug": "...", "episode_number": 1}
 
 Output:
     Prints JSON result to stdout (last line).
@@ -28,7 +28,8 @@ from urllib.parse import quote_plus
 
 # Ensure Playwright uses a project-local browser cache on Render
 _playwright_cache = os.path.join(os.path.dirname(__file__), ".playwright")
-os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", _playwright_cache)
+if os.path.exists(_playwright_cache):
+    os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", _playwright_cache)
 
 # Signal to scraper.py that we're running as a subprocess
 # This makes scraper.py redirect print() to stderr
@@ -44,19 +45,42 @@ def log(msg: str):
     print(msg, file=sys.stderr)
 
 
+def _normalize_title(value: str | None) -> str:
+    if not value:
+        return ""
+    normalized = value.lower()
+    normalized = normalized.replace("&", " and ")
+    normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
+    normalized = re.sub(r"\b(season|part|cour|tv)\b", " ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return normalized
+
+
+def _title_similarity_score(source_title: str, candidate_title: str) -> float:
+    source = _normalize_title(source_title)
+    candidate = _normalize_title(candidate_title)
+    if not source or not candidate:
+        return 0.0
+    if source == candidate:
+        return 1.0
+    if source in candidate or candidate in source:
+        shorter = min(len(source), len(candidate))
+        longer = max(len(source), len(candidate))
+        return shorter / longer
+
+    source_tokens = set(source.split())
+    candidate_tokens = set(candidate.split())
+    if not source_tokens or not candidate_tokens:
+        return 0.0
+    overlap = len(source_tokens & candidate_tokens)
+    union = len(source_tokens | candidate_tokens)
+    return overlap / union if union else 0.0
+
+
 async def run_action(action: str, params: dict):
     """Dispatch to the appropriate scraper function."""
 
-    if action == "anizone_search":
-        return await anizone_search(params["title"])
-
-    elif action == "anizone_scrape":
-        return await anizone_scrape(params["url"])
-
-    elif action == "anizone_episode":
-        return await anizone_scrape_episode(params["url"], params["episode_number"])
-
-    elif action == "animepahe_full":
+    if action == "animepahe_full":
         from scraper import scrape_animepahe
         result = await scrape_animepahe(
             params["title"],
@@ -98,81 +122,115 @@ async def run_action(action: str, params: dict):
     elif action == "animepahe_latest":
         from scraper import scrape_animepahe_latest
         return await scrape_animepahe_latest(params.get("pages", 3))
+    elif action == "reanime_latest":
+        from scraper import scrape_reanime_latest
+        return await scrape_reanime_latest()
 
     elif action == "anime_schedule":
         from scraper import scrape_anime_schedule
         return await scrape_anime_schedule()
+
+    elif action == "reanime_search":
+        return await reanime_search(params["title"], params.get("anilist_id"))
+
+    elif action == "reanime_scrape_episode":
+        return await reanime_scrape_episode(params["slug"], params["episode_number"])
 
     else:
         log(f"Unknown action: {action}")
         return None
 
 
-# ── AniZone actions ──────────────────────────────────────────
+# ── Re:ANIME actions ──────────────────────────────────────────
 
-async def anizone_search(title: str) -> dict | None:
-    """Search AniZone for an anime title."""
+async def reanime_search(title: str, target_anilist_id: int = None) -> dict | None:
+    """Search Re:ANIME for an anime title and optionally verify AniList ID."""
     from playwright.async_api import async_playwright
 
-    log(f"[AniZone] Searching for: {title}")
+    log(f"[Re:ANIME] Searching for: {title} (Target AniList: {target_anilist_id})")
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            viewport={"width": 1280, "height": 720}
         )
         page = await context.new_page()
         try:
-            # Correct search URL for AniZone (URL-encode to support Japanese titles)
-            search_url = f"https://anizone.to/anime?search={quote_plus(title)}"
-            await page.goto(search_url, wait_until="networkidle", timeout=15000)
+            await page.goto("https://reanime.to/", wait_until="domcontentloaded", timeout=30000)
 
-            # Look for any link containing '/anime/'
+            # Try to find any search trigger
+            try:
+                await page.click("button:has-text('Search')", timeout=5000)
+            except:
+                # Fallback: try to find the input directly if it's already there
+                pass
+
+            # Type query with delay
+            search_input = "input[placeholder*='Search']"
+            await page.wait_for_selector(search_input, timeout=10000)
+            await page.click(search_input)
+            await page.keyboard.type(title, delay=100)
+            await page.keyboard.press("Enter")
+
+            # Wait for results
+            await page.wait_for_timeout(3000)
             result_selector = "a[href*='/anime/']"
-            await page.wait_for_selector(result_selector, timeout=10000)
+            try:
+                await page.wait_for_selector(result_selector, timeout=10000)
+            except:
+                log(f"[Re:ANIME] No results found for {title}")
+                return None
 
-            # Get all results and find the best match
-            results = await page.locator(result_selector).all()
-            best_url = None
-            search_title_lower = title.lower()
+            # Get all result cards
+            cards = await page.locator("a[href*='/anime/']").all()
             
-            for res in results:
-                href = await res.get_attribute("href")
-                if not href or "/anime/" not in href or href.endswith("/anime"):
+            for card in cards:
+                href = await card.get_attribute("href")
+                if not href or "/anime/" not in href:
                     continue
                 
-                # Try to get the title from the link or its parent/child
-                link_text = await res.inner_text()
-                if not link_text:
-                    # Look for a title nearby
-                    link_text = await res.locator("xpath=..").inner_text()
+                # Get title and image
+                res_title = await card.locator("h3").inner_text()
+                res_title = res_title.strip() if res_title else ""
+                res_title_lower = res_title.lower()
                 
-                res_title = link_text.lower()
-                full_url = href if href.startswith("http") else f"https://anizone.to{href}"
+                img_src = await card.locator("img").get_attribute("src")
                 
-                if search_title_lower in res_title or res_title in search_title_lower:
-                    log(f"[AniZone] Match found: {link_text} -> {full_url}")
-                    return {"url": full_url}
+                found_anilist_id = None
+                if img_src:
+                    match = re.search(r'/bx(\d+)-', img_src)
+                    if match:
+                        found_anilist_id = int(match.group(1))
                 
-                if not best_url:
-                    best_url = full_url
-            
-            if best_url:
-                log(f"[AniZone] Fallback to first result: {best_url}")
-                return {"url": best_url}
+                # If we have a target ID, check it
+                if target_anilist_id and found_anilist_id == target_anilist_id:
+                    slug = href.split("/")[-1]
+                    log(f"[Re:ANIME] ID Match found: {slug} (AniList: {found_anilist_id})")
+                    return {"slug": slug, "anilist_id": found_anilist_id}
+                
+                # If no target ID or no image match, fallback to flexible title matching
+                similarity = _title_similarity_score(title, res_title)
+                if title.lower() in res_title_lower or res_title_lower in title.lower() or similarity >= 0.72:
+                    slug = href.split("/")[-1]
+                    log(f"[Re:ANIME] Title match found: {slug} (score: {similarity:.2f})")
+                    return {"slug": slug, "anilist_id": found_anilist_id}
+
+            log(f"[Re:ANIME] No direct match found for '{title}' in {len(cards)} results")
+
         except Exception as e:
-            log(f"[AniZone] Search error: {e}")
+            log(f"[Re:ANIME] Search error: {e}")
         finally:
             await browser.close()
     return None
 
 
-async def anizone_scrape(url: str) -> dict | None:
-    """Scrape HLS links from an AniZone anime page."""
+async def reanime_scrape_episode(slug: str, episode_number: int) -> dict | None:
+    """Scrape the FlixCloud embed URL from a Re:ANIME watch page."""
     from playwright.async_api import async_playwright
 
-    log(f"[AniZone] Scraping: {url}")
-    episodes_data = []
+    watch_url = f"https://reanime.to/watch/{slug}?ep={episode_number}"
+    log(f"[Re:ANIME] Starting scrape for Ep {episode_number}: {watch_url}")
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
@@ -182,140 +240,70 @@ async def anizone_scrape(url: str) -> dict | None:
         page = await context.new_page()
 
         try:
-            await page.goto(url, wait_until="networkidle", timeout=30000)
-
-            # Extract slug from URL: https://anizone.to/anime/ul5zmckr
-            slug = url.strip('/').split('/')[-1]
-            # Selector for episodes is links containing the slug followed by a slash
-            episode_selector = f"a[href*='/anime/{slug}/']"
+            # Use 'load' instead of 'domcontentloaded' for heavy dynamic sites
+            await page.goto(watch_url, wait_until="load", timeout=60000)
             
-            # Infinite scroll: scroll down to load episodes
-            log(f"[AniZone] Scrolling to load episodes for {slug}...")
-            for i in range(3): # Reduced from 5 to 3
-                await page.evaluate("window.scrollBy(0, 3000)")
-                await page.wait_for_timeout(500) # Reduced from 1000 to 500
-
+            # Re:ANIME has a loading sequence. Wait for the player to be injected.
+            iframe_selector = "iframe#video-player, iframe[src*='flixcloud.cc']"
+            
+            log(f"[Re:ANIME] Waiting for player to be injected and synced...")
             try:
-                await page.wait_for_selector(episode_selector, timeout=10000)
-            except:
-                log(f"[AniZone] No episodes found with selector {episode_selector} at {url}")
-                return {"episodes": []}
-
-            # Use a broad selector and filter in Python (more reliable)
-            links = await page.locator("a").all()
-            episode_targets = []
-            seen_urls = set()
-            
-            for el in links:
-                href = await el.get_attribute("href")
-                if not href or href in seen_urls:
-                    continue
+                # Wait up to 30s for the iframe to have a valid src
+                # Re:ANIME sometimes injects the iframe with no src first, then populates it.
+                await page.wait_for_function(
+                    """() => {
+                        const ifr = document.querySelector('iframe#video-player') || document.querySelector('iframe[src*="flixcloud.cc"]');
+                        return ifr && ifr.src && ifr.src !== '' && !ifr.src.includes(window.location.host);
+                    }""",
+                    timeout=35000
+                )
                 
-                # Check if it's an episode link: contains /anime/slug/
-                if f"/anime/{slug}/" in href:
-                    seen_urls.add(href)
-                    full_href = href if href.startswith("http") else f"https://anizone.to{href}"
-                    # Episode number is the last part
-                    ep_num = full_href.strip('/').split('/')[-1]
-                    if ep_num.isdigit():
-                        episode_targets.append({"number": ep_num, "url": full_href})
+                iframe = await page.query_selector(iframe_selector)
+                embed_url = await iframe.get_attribute("src")
+                
+                if embed_url:
+                    log(f"[Re:ANIME] Found FlixCloud embed: {embed_url}")
+                    
+                    # Extract available episodes while we're here
+                    available_episodes = 1
+                    try:
+                        ep_elements = await page.query_selector_all("a[data-episode]")
+                        if ep_elements:
+                            ep_nums = []
+                            for el in ep_elements:
+                                ep_str = await el.get_attribute("data-episode")
+                                if ep_str and ep_str.isdigit():
+                                    ep_nums.append(int(ep_str))
+                            if ep_nums:
+                                available_episodes = max(ep_nums)
+                                log(f"[Re:ANIME] Detected {available_episodes} available episodes")
+                    except Exception as ee:
+                        log(f"[Re:ANIME] Failed to count episodes: {ee}")
 
-            log(f"[AniZone] Found {len(episode_targets)} episodes")
-
-            for target in episode_targets:
-                log(f"[AniZone] Extracting Ep {target['number']}...")
-                await page.goto(target["url"], wait_until="domcontentloaded")
-
-                try:
-                    player = await page.wait_for_selector("media-player", timeout=10000)
-                    m3u8_url = await player.get_attribute("src")
-
-                    subtitles = []
-                    track_elements = await page.locator("media-player track").all()
-                    for track in track_elements:
-                        kind = await track.get_attribute("kind")
-                        if kind in ["subtitles", "captions"]:
-                            sub_src = await track.get_attribute("src")
-                            sub_label = await track.get_attribute("label")
-                            sub_lang = await track.get_attribute("srclang")
-                            if sub_src:
-                                subtitles.append({
-                                    "url": sub_src,
-                                    "label": sub_label or "Unknown",
-                                    "lang": sub_lang or "en"
-                                })
-
-                    if m3u8_url and ".m3u8" in m3u8_url:
-                        ep_num = int(target["number"]) if target["number"].isdigit() else target["number"]
-                        episodes_data.append({
-                            "ep_number": ep_num,
-                            "stream_url": m3u8_url,
-                            "subtitles": subtitles,
-                            "provider": "anizone",
-                            "referer_url": target["url"],
-                        })
-                        log(f"  -> Ep {target['number']}: OK")
-                except Exception as e:
-                    log(f"  -> Failed Ep {target['number']}: {e}")
-                await page.wait_for_timeout(500)
-
+                    return {
+                        "embed_url": embed_url,
+                        "stream_url": None,
+                        "provider": "reanime",
+                        "referer_url": watch_url,
+                        "available_episodes": available_episodes
+                    }
+                else:
+                    log(f"[Re:ANIME] Iframe found but has no src attribute after waiting")
+            except Exception as e:
+                log(f"[Re:ANIME] Player src population timeout or error: {e}")
+                
+                # Debug: Log what's actually on the page
+                if await page.query_selector("div:has-text('Loading')"):
+                    log(f"[Re:ANIME] Page stuck on 'Loading' state")
+                elif await page.query_selector("div:has-text('Syncing')"):
+                    log(f"[Re:ANIME] Page stuck on 'Syncing' state")
+                
         except Exception as e:
-            log(f"[AniZone] Scrape error: {e}")
+            log(f"[Re:ANIME] Scrape error for {watch_url}: {e}")
         finally:
             await browser.close()
 
-    return {"episodes": episodes_data}
-
-
-async def anizone_scrape_episode(url: str, episode_number: int) -> dict | None:
-    """Scrape a single AniZone episode directly from its episode page."""
-    from playwright.async_api import async_playwright
-
-    log(f"[AniZone] Scraping single episode {episode_number} from: {url}")
-    slug = url.strip("/").split("/")[-1]
-    episode_url = f"https://anizone.to/anime/{slug}/{episode_number}"
-
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-        )
-        page = await context.new_page()
-
-        try:
-            await page.goto(episode_url, wait_until="domcontentloaded", timeout=20000)
-            player = await page.wait_for_selector("media-player", timeout=10000)
-            m3u8_url = await player.get_attribute("src")
-
-            subtitles = []
-            track_elements = await page.locator("media-player track").all()
-            for track in track_elements:
-                kind = await track.get_attribute("kind")
-                if kind in ["subtitles", "captions"]:
-                    sub_src = await track.get_attribute("src")
-                    if sub_src:
-                        subtitles.append({
-                            "url": sub_src,
-                            "label": await track.get_attribute("label") or "Unknown",
-                            "lang": await track.get_attribute("srclang") or "en"
-                        })
-
-            if m3u8_url and ".m3u8" in m3u8_url:
-                return {
-                    "episodes": [{
-                        "ep_number": int(episode_number),
-                        "stream_url": m3u8_url,
-                        "subtitles": subtitles,
-                        "provider": "anizone",
-                        "referer_url": episode_url,
-                    }]
-                }
-        except Exception as e:
-            log(f"[AniZone] Single-episode scrape error: {e}")
-        finally:
-            await browser.close()
-
-    return {"episodes": []}
+    return None
 
 
 ANIMEPAHE_BASE = "https://animepahe.pw"
@@ -353,17 +341,27 @@ def _select_animepahe_episode(episodes: list, requested_episode: int):
 
 
 def _animepahe_warmup(page):
-    """
-    Warm the browser session for DDoS-Guard protected pages.
-    Treat the landing page as a cookie/bootstrap step instead of failing
-    the whole scrape if full DOM readiness is slow.
-    """
-    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
-
+    """Navigate to home page and wait for DDoS-Guard/Cloudflare to clear."""
     try:
-        page.goto(ANIMEPAHE_BASE, wait_until="commit", timeout=45000)
-    except PlaywrightTimeoutError:
-        log("[AnimePahe] Warmup timed out at commit stage; continuing with current session state")
+        log("[AnimePahe] Warming up to clear DDoS-Guard...")
+        page.goto(ANIMEPAHE_BASE, wait_until="load", timeout=60000)
+        
+        # Wait for "Checking your browser" to disappear
+        for _ in range(15): # Up to 15 seconds
+            title = page.title()
+            if "Checking your browser" not in title and "Just a moment" not in title:
+                break
+            page.wait_for_timeout(1000)
+        
+        # Ensure we are on a real page by waiting for a common element
+        try:
+            page.wait_for_selector(".navbar, .logo, .content-wrapper", timeout=10000)
+            log("[AnimePahe] Warmup successful.")
+        except Exception:
+            log("[AnimePahe] Warmup timed out waiting for navbar, but proceeding anyway.")
+            
+    except Exception as e:
+        log(f"[AnimePahe] Warmup error: {e}")
 
     page.wait_for_timeout(5000)
 
@@ -375,7 +373,8 @@ def _animepahe_json_request(page, url: str, label: str):
     last_error = None
     for attempt in range(3):
         try:
-            response = page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            response = page.goto(url, wait_until="commit", timeout=45000)
+            page.wait_for_timeout(2000)
             body_text = page.locator("body").inner_text().strip()
             if not body_text:
                 raise json.JSONDecodeError("Empty response body", body_text, 0)
@@ -425,11 +424,53 @@ def scrape_animepahe_episode_sync(title: str, episode_number: int, session_id: s
                 if not results:
                     log(f"[AnimePahe] No results for: {title}")
                     return result
-                session_id = results[0]["session"]
+                
+                # Use similarity check to find the best match instead of just picking results[0]
+                best_match = results[0]
+                search_title_norm = _normalize_title(title)
+                best_score = _title_similarity_score(title, best_match.get("title", ""))
+                
+                for res in results:
+                    res_title = res.get("title", "")
+                    score = _title_similarity_score(title, res_title)
+                    if score > best_score:
+                        best_score = score
+                        best_match = res
+                    if score > 0.95: # Close enough to stop
+                        break
+                
+                session_id = best_match["session"]
+                log(f"[AnimePahe] Best search match: {best_match.get('title')} (score: {best_score:.2f})")
                 result["session"] = session_id
 
             anime_url = f"{ANIMEPAHE_BASE}/anime/{session_id}"
-            page.goto(anime_url, wait_until="domcontentloaded", timeout=30000)
+            response = page.goto(anime_url, wait_until="commit", timeout=45000)
+            
+            if response and response.status == 404:
+                log(f"[AnimePahe] 404 Not Found for {anime_url}. Attempting to re-search...")
+                # Clear session_id and trigger a re-search
+                api_url = f"{ANIMEPAHE_BASE}/api?m=search&q={quote_plus(title)}"
+                data = _animepahe_json_request(page, api_url, f"recovery search for {title}")
+                results = data.get("data", [])
+                if results:
+                    best_match = results[0]
+                    best_score = 0
+                    for res in results:
+                        score = _title_similarity_score(title, res.get("title", ""))
+                        if score > best_score:
+                            best_score = score
+                            best_match = res
+                    
+                    session_id = best_match["session"]
+                    result["session"] = session_id
+                    anime_url = f"{ANIMEPAHE_BASE}/anime/{session_id}"
+                    log(f"[AnimePahe] Re-search found: {best_match.get('title')} (session: {session_id})")
+                    page.goto(anime_url, wait_until="commit", timeout=45000)
+                else:
+                    log(f"[AnimePahe] Recovery search failed for {title}")
+                    return result
+            
+            page.wait_for_timeout(2000)
 
             try:
                 page.wait_for_selector(".content-wrapper, .anime-content", timeout=15000)
@@ -493,8 +534,8 @@ def scrape_animepahe_episode_sync(title: str, episode_number: int, session_id: s
                 log(f"[AnimePahe] Falling back to relative episode order for request {episode_number}")
 
             play_url = f"{ANIMEPAHE_BASE}/play/{session_id}/{target_episode['session']}"
-            page.goto(play_url, wait_until="domcontentloaded", timeout=30000)
-            page.wait_for_timeout(2000)
+            page.goto(play_url, wait_until="commit", timeout=45000)
+            page.wait_for_timeout(3000)
             play_content = page.content()
             kwik_matches = re.findall(r'https://kwik\.[a-z]+/e/[a-zA-Z0-9]+', play_content)
 
@@ -549,7 +590,10 @@ def scrape_animepahe_catalog_sync(title: str, session_id: str | None = None, off
                 result["session"] = session_id
 
             anime_url = f"{ANIMEPAHE_BASE}/anime/{session_id}"
-            page.goto(anime_url, wait_until="domcontentloaded", timeout=30000)
+            response = page.goto(anime_url, wait_until="commit", timeout=45000)
+            if response and response.status == 404:
+                log(f"[AnimePahe] 404 Not Found for {anime_url}. Session ID may be stale.")
+            page.wait_for_timeout(2000)
             try:
                 page.wait_for_selector(".content-wrapper, .anime-content", timeout=15000)
             except Exception:
@@ -698,6 +742,7 @@ async def resolve_kwik_stream(url: str) -> dict | None:
 # ── Entry point ──────────────────────────────────────────────
 
 if __name__ == "__main__":
+    log("DEBUG: Scraper starting")
     if len(sys.argv) < 3:
         print(json.dumps({"error": "Usage: python scraper_runner.py <action> <json_params>"}))
         sys.exit(1)

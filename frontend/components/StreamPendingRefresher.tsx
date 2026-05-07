@@ -1,17 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { CatalogStatus } from "@/lib/types";
 
 interface StreamPendingRefresherProps {
     pollIntervalSeconds?: number;
     estimateSeconds?: number;
+    fallbackAfterSeconds?: number;
     title?: string;
     thumbnailUrl?: string;
     episodeLabel?: string;
     availableEpisodes?: number;
     catalogStatus?: CatalogStatus;
+    provider?: string;
 }
 
 function formatAiringCountdown(nextAiringAt?: string | null, nextEpisode?: number | null, nowMs: number = 0) {
@@ -37,17 +39,21 @@ function formatAiringCountdown(nextAiringAt?: string | null, nextEpisode?: numbe
 export default function StreamPendingRefresher({
     pollIntervalSeconds = 25,
     estimateSeconds = 90,
+    fallbackAfterSeconds = 45,
     title = "Preparing your stream",
     thumbnailUrl = "/placeholder.png",
     episodeLabel = "Episode",
     availableEpisodes,
     catalogStatus,
+    provider = "animepahe",
 }: StreamPendingRefresherProps) {
     const router = useRouter();
     const pathname = usePathname();
+    const searchParams = useSearchParams();
     const countdownStorageKey = `stream-pending-start:${pathname}`;
     const [secondsLeft, setSecondsLeft] = useState(estimateSeconds);
     const [nowMs, setNowMs] = useState(0);
+    const [hasTriggeredFallback, setHasTriggeredFallback] = useState(false);
 
     useEffect(() => {
         if (typeof window === "undefined") return;
@@ -66,12 +72,25 @@ export default function StreamPendingRefresher({
             return Math.max(estimateSeconds - elapsedSeconds, 0);
         };
 
+        const getElapsedSeconds = () => Math.floor((Date.now() - startAt) / 1000);
+
         const refreshTimer = window.setInterval(() => {
             router.refresh();
         }, pollIntervalSeconds * 1000);
 
         const countdownTimer = window.setInterval(() => {
             setSecondsLeft(getRemainingSeconds());
+
+            if (
+                provider === "animepahe" &&
+                !hasTriggeredFallback &&
+                getElapsedSeconds() >= fallbackAfterSeconds
+            ) {
+                const params = new URLSearchParams(searchParams.toString());
+                params.set("prefer", "reanime");
+                setHasTriggeredFallback(true);
+                router.replace(`${pathname}?${params.toString()}`);
+            }
         }, 1000);
 
         const airingTimer = window.setInterval(() => {
@@ -83,7 +102,17 @@ export default function StreamPendingRefresher({
             window.clearInterval(countdownTimer);
             window.clearInterval(airingTimer);
         };
-    }, [countdownStorageKey, estimateSeconds, pollIntervalSeconds, router]);
+    }, [
+        countdownStorageKey,
+        estimateSeconds,
+        fallbackAfterSeconds,
+        hasTriggeredFallback,
+        pathname,
+        pollIntervalSeconds,
+        provider,
+        router,
+        searchParams,
+    ]);
 
     const nextAiringCountdown = formatAiringCountdown(
         catalogStatus?.next_airing_at,
@@ -111,12 +140,12 @@ export default function StreamPendingRefresher({
             <div className="stream-pending-copy">
                 <div className="stream-pending-kicker">
                     <span className="stream-pending-dot" />
-                    Connecting to AnimePahe Server
+                    {provider === "animepahe" ? "Connecting to primary stream server" : "Connecting to backup stream server"}
                 </div>
                 <h2 className="stream-pending-title">{title}</h2>
                 <p className="stream-pending-episode">{episodeLabel}</p>
                 <p className="stream-pending-text">
-                    We&apos;re getting this episode ready for playback. Please wait a moment while we load the stream.
+                    We&apos;re getting this episode ready for playback. If the primary source takes too long, we&apos;ll try another server automatically.
                 </p>
 
                 <div className="stream-pending-stats">
@@ -126,7 +155,7 @@ export default function StreamPendingRefresher({
                     </div>
                     <div className="stream-pending-stat">
                         <span className="stream-pending-stat-label">Now doing</span>
-                        <strong>Preparing your episode</strong>
+                        <strong>{provider === "animepahe" ? "Checking primary source" : "Trying backup source"}</strong>
                     </div>
                     <div className="stream-pending-stat">
                         <span className="stream-pending-stat-label">Episodes found</span>
@@ -157,6 +186,7 @@ export default function StreamPendingRefresher({
 
                 <p className="stream-pending-hint">
                     We check again every {pollIntervalSeconds}s in the background and will load the player as soon as the stream is ready.
+                    {provider === "animepahe" ? ` If this takes more than ${fallbackAfterSeconds}s, we switch to Re:ANIME automatically.` : ""}
                 </p>
             </div>
         </section>

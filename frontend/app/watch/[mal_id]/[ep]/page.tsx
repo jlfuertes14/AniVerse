@@ -24,8 +24,12 @@ async function getStreamData(
     malId: string,
     ep: string,
     prefer?: string,
+    from?: string,
 ): Promise<StreamResponse | PendingStreamState | null> {
-    const query = prefer ? `?prefer=${encodeURIComponent(prefer)}` : "";
+    const params = new URLSearchParams();
+    if (prefer) params.set("prefer", prefer);
+    if (from) params.set("from", from);
+    const query = params.toString() ? `?${params.toString()}` : "";
     const res = await fetch(`${API_BASE}/stream/${malId}/${ep}${query}`, {
         cache: "no-store",
     });
@@ -84,14 +88,15 @@ export default async function WatchPage({
     searchParams,
 }: {
     params: Promise<{ mal_id: string; ep: string }>;
-    searchParams?: { prefer?: string };
+    searchParams: Promise<{ prefer?: string; from?: string }>;
 }) {
-    const resolvedParams = await params;
+    const [resolvedParams, resolvedSearchParams] = await Promise.all([params, searchParams]);
     const { mal_id, ep } = resolvedParams;
-    const preferProvider = searchParams?.prefer;
+    const preferProvider = resolvedSearchParams?.prefer;
+    const fromContext = resolvedSearchParams?.from;
 
     const [streamData, anime, aiRelated, trendingItems] = await Promise.all([
-        getStreamData(mal_id, ep, preferProvider),
+        getStreamData(mal_id, ep, preferProvider, fromContext),
         getAnimeData(mal_id),
         getRelatedRecommendations(mal_id),
         getTrendingItems(),
@@ -105,11 +110,28 @@ export default async function WatchPage({
     const streamAvailableEpisodes = !isPendingStreamState(streamData) && streamData
         ? streamData.available_episodes
         : undefined;
-    const totalEpisodes = streamProvider === "anizone" && anime?.episodes
-        ? anime.episodes
-        : (typeof streamAvailableEpisodes === "number" && streamAvailableEpisodes > 0
-            ? streamAvailableEpisodes
-            : (anime?.episodes || 12));
+    
+    // Combine all sources of truth for episode count
+    const jikanEpisodes = anime?.episodes || 0;
+    const providerEpisodes = typeof streamAvailableEpisodes === "number" ? streamAvailableEpisodes : 0;
+    const isAiring = anime?.status === "Currently Airing";
+
+    // Logic: 
+    // 1. If it's airing, we trust the provider's available count more than the total planned episodes.
+    // 2. We always show at least the episode the user is currently watching.
+    // 3. We fallback to 12 as a sensible minimum for UI layout if no data exists.
+    let totalEpisodes: number;
+
+    if (isAiring) {
+        // For airing shows, limit to what's actually available to watch, 
+        // or what Jikan says has aired so far (if provider is empty).
+        totalEpisodes = Math.max(providerEpisodes, normalizedEpisode);
+        if (totalEpisodes === 0) totalEpisodes = Math.max(jikanEpisodes, 12);
+    } else {
+        // For finished shows, the Jikan total is the source of truth.
+        totalEpisodes = Math.max(jikanEpisodes, providerEpisodes, normalizedEpisode, 12);
+    }
+    
     const episodeItems = buildEpisodeList(totalEpisodes, normalizedEpisode);
     const relatedItems = (aiRelated?.length ? aiRelated : anime?.recommendations?.length ? anime.recommendations : anime?.related || []).slice(0, 6);
 
@@ -124,6 +146,7 @@ export default async function WatchPage({
                         episodeLabel={`Episode ${ep}`}
                         availableEpisodes={streamData.available_episodes}
                         catalogStatus={streamData.catalog_status}
+                        provider={preferProvider || "animepahe"}
                     />
                 </main>
             </>

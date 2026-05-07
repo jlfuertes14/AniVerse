@@ -1,23 +1,49 @@
 "use client";
 
-import { useState } from "react";
-import Link from "next/link";
+import { useState, useEffect } from "react";
+import { getLatestReleases } from "@/lib/api";
 import type { LatestRelease } from "@/lib/types";
+import LoadingLink from "@/components/LoadingLink";
 
 interface LatestReleasesGridProps {
     initialReleases: LatestRelease[];
 }
 
 export default function LatestReleasesGrid({ initialReleases }: LatestReleasesGridProps) {
+    const [releases, setReleases] = useState<LatestRelease[]>(initialReleases);
+    const [provider, setProvider] = useState<string>("animepahe");
+    const [isLoading, setIsLoading] = useState(false);
     const [currentPage, setCurrentPage] = useState(1);
     const itemsPerPage = 12;
 
-    if (!initialReleases || initialReleases.length === 0) return null;
+    useEffect(() => {
+        if (provider === "animepahe" && releases === initialReleases) return;
+        
+        async function fetchNewReleases() {
+            setIsLoading(true);
+            try {
+                const data = await getLatestReleases(provider);
+                setReleases(data);
+                setCurrentPage(1);
+            } catch (error) {
+                console.error("Failed to fetch releases:", error);
+            } finally {
+                setIsLoading(false);
+            }
+        }
+        
+        fetchNewReleases();
+    }, [provider]);
+
+    if (!releases || releases.length === 0) {
+        if (isLoading) return <div className="container-wide py-20 text-center">Loading releases...</div>;
+        return null;
+    }
 
     // Pagination logic
-    const totalPages = Math.ceil(initialReleases.length / itemsPerPage);
+    const totalPages = Math.ceil(releases.length / itemsPerPage);
     const startIndex = (currentPage - 1) * itemsPerPage;
-    const currentItems = initialReleases.slice(startIndex, startIndex + itemsPerPage);
+    const currentItems = releases.slice(startIndex, startIndex + itemsPerPage);
 
     const handlePageChange = (newPage: number) => {
         setCurrentPage(newPage);
@@ -43,9 +69,54 @@ export default function LatestReleasesGrid({ initialReleases }: LatestReleasesGr
                 alignItems: 'center', 
                 marginBottom: '2rem',
                 borderBottom: '1px solid var(--border-subtle)',
-                paddingBottom: '0.75rem'
+                paddingBottom: '0.75rem',
+                flexWrap: 'wrap',
+                gap: '1rem'
             }}>
-                <h2 className="section-heading" style={{ margin: 0 }}>Latest Releases</h2>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+                    <h2 className="section-heading" style={{ margin: 0 }}>Latest Releases</h2>
+                    
+                    <div className="provider-toggle" style={{ 
+                        display: 'flex', 
+                        background: 'rgba(255,255,255,0.05)', 
+                        padding: '3px',
+                        borderRadius: 'var(--radius-md)',
+                        border: '1px solid var(--border-subtle)'
+                    }}>
+                        <button 
+                            onClick={() => setProvider("animepahe")}
+                            style={{
+                                padding: '0.4rem 1rem',
+                                fontSize: '0.8rem',
+                                fontWeight: '600',
+                                borderRadius: 'var(--radius-sm)',
+                                background: provider === "animepahe" ? 'var(--gold)' : 'transparent',
+                                color: provider === "animepahe" ? '#000' : 'var(--text-secondary)',
+                                border: 'none',
+                                cursor: 'pointer',
+                                transition: 'all 0.2s ease'
+                            }}
+                        >
+                            AnimePahe
+                        </button>
+                        <button 
+                            onClick={() => setProvider("reanime")}
+                            style={{
+                                padding: '0.4rem 1rem',
+                                fontSize: '0.8rem',
+                                fontWeight: '600',
+                                borderRadius: 'var(--radius-sm)',
+                                background: provider === "reanime" ? 'var(--gold)' : 'transparent',
+                                color: provider === "reanime" ? '#000' : 'var(--text-secondary)',
+                                border: 'none',
+                                cursor: 'pointer',
+                                transition: 'all 0.2s ease'
+                            }}
+                        >
+                            Re:ANIME
+                        </button>
+                    </div>
+                </div>
                 {totalPages > 1 && (
                     <div className="pagination-info" style={{ 
                         fontSize: '0.9rem', 
@@ -61,11 +132,15 @@ export default function LatestReleasesGrid({ initialReleases }: LatestReleasesGr
                 )}
             </div>
 
-            <div className="latest-grid">
+            <div className={`latest-grid ${isLoading ? 'opacity-50 pointer-events-none' : ''}`} style={{ transition: 'opacity 0.3s ease' }}>
                 {currentItems.map((rel: LatestRelease, idx: number) => (
-                    <div key={`${rel.session}-${idx}`} className="latest-card-wrapper">
+                    <div key={`${rel.session || rel.slug || idx}-${idx}`} className="latest-card-wrapper">
                         {rel.mal_id ? (
-                            <Link href={`/watch/${rel.mal_id}/${rel.episode}?from=latest`} className="latest-card">
+                            <LoadingLink
+                                href={`/watch/${rel.mal_id}/${rel.episode}?from=latest&prefer=${provider}`}
+                                className="latest-card"
+                                loadingMessage={`Loading ${rel.title}...`}
+                            >
                                 <div className="latest-image-wrapper">
                                     <img src={rel.snapshot} alt={rel.title} loading="lazy" />
                                     <div className="latest-card-overlay">
@@ -75,7 +150,7 @@ export default function LatestReleasesGrid({ initialReleases }: LatestReleasesGr
                                         </div>
                                     </div>
                                 </div>
-                            </Link>
+                            </LoadingLink>
                         ) : (
                             <div className="latest-card disabled">
                                 <div className="latest-image-wrapper">
@@ -205,7 +280,7 @@ export default function LatestReleasesGrid({ initialReleases }: LatestReleasesGr
                         </button>
                     </div>
                     <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                        Showing {startIndex + 1}-{Math.min(startIndex + itemsPerPage, initialReleases.length)} of {initialReleases.length} releases
+                        Showing {startIndex + 1}-{Math.min(startIndex + itemsPerPage, releases.length)} of {releases.length} releases
                     </div>
                 </div>
             )}

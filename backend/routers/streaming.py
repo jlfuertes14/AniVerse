@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Query
 from fastapi.responses import JSONResponse
 from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
@@ -15,7 +15,11 @@ from backend.services.animepahe_service import (
     get_animepahe_stream,
     resolve_animepahe_embed_stream,
 )
-from backend.services.anizone_service import discover_anizone_episode
+from backend.services.reanime_service import (
+    search_reanime_by_title,
+    scrape_reanime_episode,
+    get_stream_for_episode as get_reanime_stream
+)
 from backend.services.jikan_service import get_anime_detail
 
 router = APIRouter(prefix="/stream", tags=["streaming"])
@@ -23,10 +27,8 @@ router = APIRouter(prefix="/stream", tags=["streaming"])
 
 SOURCE_PRIORITY = {
     "animepahe": 0,
-    "anizone": 1,
+    "reanime": 1,
 }
-
-ANIZONE_LOCK_TTL = timedelta(minutes=6)
 
 
 async def _resolve_and_cache_embed_stream(db, stream_id, embed_url: str):
@@ -52,77 +54,21 @@ def _sort_stream_candidates(records: list[dict]) -> list[dict]:
     )
 
 
-async def _acquire_anizone_episode_lock(db, mal_id: int, ep_number: int) -> str | None:
-    now = datetime.now(timezone.utc)
-    expires_at = now + ANIZONE_LOCK_TTL
-    key = f"anizone:{mal_id}:{ep_number}"
-
-    refreshed = await db["refresh_locks"].find_one_and_update(
-        {
-            "key": key,
-            "$or": [
-                {"expires_at": {"$lte": now}},
-                {"expires_at": {"$exists": False}},
-            ],
-        },
-        {"$set": {
-            "provider": "anizone",
-            "mal_id": mal_id,
-            "episode": ep_number,
-            "expires_at": expires_at,
-            "updated_at": now,
-        }},
-        return_document=ReturnDocument.AFTER,
-    )
-    if refreshed:
-        return key
-
-    try:
-        await db["refresh_locks"].insert_one({
-            "key": key,
-            "provider": "anizone",
-            "mal_id": mal_id,
-            "episode": ep_number,
-            "expires_at": expires_at,
-            "created_at": now,
-        })
-        return key
-    except DuplicateKeyError:
-        return None
-
-
-async def _release_anizone_episode_lock(db, key: str | None):
-    if not key:
-        return
-    await db["refresh_locks"].delete_one({"key": key})
-
-
-async def _run_anizone_episode_discovery(db, mal_id: int, title: str, ep_number: int, key: str | None):
-    try:
-        await discover_anizone_episode(mal_id, title, ep_number)
-    finally:
-        await _release_anizone_episode_lock(db, key)
-
-
-async def _queue_anizone_episode(db, background_tasks: BackgroundTasks, mal_id: int, title: str, ep_number: int) -> bool:
-    key = await _acquire_anizone_episode_lock(db, mal_id, ep_number)
-    if not key:
-        return False
-
-    background_tasks.add_task(_run_anizone_episode_discovery, db, mal_id, title, ep_number, key)
-    return True
-
-
 async def _get_latest_episode_number(db, mal_id: int, source: str | None = None) -> int:
     query = {"anilist_id": mal_id}
     if source:
         query["source"] = source
 
-    latest = await db["streams"].find_one(query, sort=[("episode", -1)])
-    try:
-        return int(latest.get("episode", 0)) if latest else 0
-    except (TypeError, ValueError):
-        return 0
+    latest_db = await db["streams"].find_one(query, sort=[("episode", -1)])
+    db_count = int(latest_db.get("episode", 0)) if latest_db else 0
+    
+    # Check provider mapping for Re:ANIME specifically to get the total available on site
+    if source == "reanime":
+        mapping = await db["provider_mappings"].find_one({"mal_id": mal_id, "provider": "reanime"})
+        if mapping and mapping.get("latest_episode"):
+            return max(db_count, int(mapping["latest_episode"]))
+
+    return db_count
 
 
 def _build_catalog_status(mapping: dict | None, provider: str = "animepahe") -> CatalogStatus | None:
@@ -151,6 +97,7 @@ async def get_episode_stream(
     ep_number: int,
     background_tasks: BackgroundTasks,
     prefer: str | None = None,
+    from_context: str | None = Query(None, alias="from"),
 ):
     """Resolve a streaming URL (iframe or HLS) for a given MAL ID and episode."""
     db = get_db()
@@ -161,11 +108,17 @@ async def get_episode_stream(
     
     search_numbers = [ep_number]
     if offset > 0 and ep_number > offset:
-        # If user requests Ep 15 and offset is 12, we also check for Ep 3
         search_numbers.append(ep_number - offset)
     elif offset > 0:
-        # If user requests Ep 3 and offset is 12, we also check for Ep 15
         search_numbers.append(ep_number + offset)
+
+    animepahe_requested_episode = ep_number
+    if prefer == "animepahe" and from_context == "latest" and offset > 0 and ep_number > offset:
+        animepahe_requested_episode = ep_number - offset
+        print(
+            f"[Streaming] Normalized AnimePahe latest-release episode "
+            f"{ep_number} -> {animepahe_requested_episode} using offset {offset} for MAL {mal_id}"
+        )
 
     animepahe_mapping = await get_animepahe_mapping(mal_id)
 
@@ -174,17 +127,25 @@ async def get_episode_stream(
         {"anilist_id": mal_id, "episode": {"$in": search_numbers}}
     ).to_list(length=20)
 
-    preferred = []
-    if prefer in {"animepahe", "anizone"}:
-        preferred = [record for record in stream_candidates if record.get("source") == prefer]
-
-    stream_data = None
-    if preferred:
-        stream_data = _sort_stream_candidates(preferred)[0]
-    elif stream_candidates:
-        stream_data = _sort_stream_candidates(stream_candidates)[0]
+    preferred_record = None
+    if prefer in {"reanime", "animepahe"}:
+        matches = [record for record in stream_candidates if record.get("source") == prefer]
+        if matches:
+            preferred_record = _sort_stream_candidates(matches)[0]
+        else:
+            # If preferred source is NOT in DB, we must trigger discovery
+            # instead of falling back to other DB records immediately
+            print(f"[Streaming] Preferred source '{prefer}' missing from DB. Triggering discovery...")
+            stream_data = None
     
-    # If we found a record, use its episode number (might be the mapped one)
+    if not preferred_record and not (prefer and not any(r.get("source") == prefer for r in stream_candidates)):
+        if stream_candidates:
+            stream_data = _sort_stream_candidates(stream_candidates)[0]
+        else:
+            stream_data = None
+    else:
+        stream_data = preferred_record
+    
     resolved_ep = stream_data["episode"] if stream_data else ep_number
     
     if stream_data:
@@ -201,7 +162,6 @@ async def get_episode_stream(
                     stream_data["episode_id"]
                 )
                 if stream_url:
-                    # Update DB with the resolved URL
                     await db["streams"].update_one(
                         {"_id": stream_data["_id"]},
                         {"$set": {"stream_url": stream_url, "updated_at": "resolved"}}
@@ -211,7 +171,6 @@ async def get_episode_stream(
                 print(f"[Streaming] AnimePahe resolution failed: {e}")
 
         if stream_data.get("stream_url") or stream_data.get("embed_url"):
-            # kwik.cx links are embeds, not direct HLS streams
             s_url = stream_data.get("stream_url")
             e_url = stream_data.get("embed_url")
             referer_url = stream_data.get("referer_url")
@@ -228,23 +187,10 @@ async def get_episode_stream(
                     e_url,
                 )
 
-            if stream_data.get("source") == "anizone" and not referer_url:
-                anizone_mapping = await db["provider_mappings"].find_one(
-                    {"mal_id": mal_id, "provider": "anizone"},
-                    {"url": 1},
-                )
-                base_url = (anizone_mapping or {}).get("url")
-                if base_url:
-                    referer_url = f"{base_url.rstrip('/')}/{resolved_ep}"
-                    stream_data["referer_url"] = referer_url
-                    await db["streams"].update_one(
-                        {"_id": stream_data["_id"]},
-                        {"$set": {"referer_url": referer_url}},
-                    )
-
+            print(f"[Streaming] Returning {stream_data.get('source')} stream for {mal_id} Ep {resolved_ep}")
             return StreamResponse(
                 mal_id=mal_id,
-                ep_number=resolved_ep, # Return the mapped episode number
+                ep_number=resolved_ep,
                 stream_url=s_url,
                 embed_url=e_url,
                 subtitles=stream_data.get("subtitles", []),
@@ -260,25 +206,30 @@ async def get_episode_stream(
                 else None,
             )
 
-    # 2. If missing, trigger on-demand discovery across multiple providers
+    # 2. If missing, trigger on-demand discovery
     try:
         anime = await get_anime_detail(mal_id)
         if not anime:
             raise HTTPException(status_code=404, detail="Anime not found on MAL")
         
         search_title = anime.title_english or anime.title
-
-        from backend.services.animepahe_service import should_refresh_animepahe_catalog
-        should_refresh, mapping = await should_refresh_animepahe_catalog(
-            mal_id, 
-            ep_number, 
-            expected_total=(anime.episodes or 0)
-        )
-        available_episodes = int(mapping.get("latest_episode", 0)) if mapping else 0
+        # Skip AnimePahe checks if user explicitly preferred reanime
+        if prefer == "reanime":
+            print(f"[Streaming] User prefers reanime. Skipping AnimePahe discovery flow.")
+            mapping = animepahe_mapping
+            available_episodes = int(mapping.get("latest_episode", 0)) if mapping else 0
+            should_refresh = False
+        else:
+            # --- AnimePahe Discovery (Primary) ---
+            from backend.services.animepahe_service import should_refresh_animepahe_catalog
+            should_refresh, mapping = await should_refresh_animepahe_catalog(
+                mal_id, 
+                animepahe_requested_episode, 
+                expected_total=(anime.episodes or 0)
+            )
+            available_episodes = int(mapping.get("latest_episode", 0)) if mapping else 0
 
         if is_animepahe_refresh_in_progress(mal_id):
-            if prefer != "animepahe":
-                await _queue_anizone_episode(db, background_tasks, mal_id, search_title, ep_number)
             pending_catalog_status = _build_catalog_status(mapping or animepahe_mapping, "animepahe")
             return JSONResponse(
                 status_code=202,
@@ -293,45 +244,55 @@ async def get_episode_stream(
                 }
             )
 
-        if not should_refresh:
-            anizone_queued = False
-            if prefer != "animepahe":
-                anizone_queued = await _queue_anizone_episode(db, background_tasks, mal_id, search_title, ep_number)
-            if anizone_queued:
-                return JSONResponse(
-                    status_code=202,
-                    content={
-                        "detail": "AniZone stream is being fetched. Please refresh in a few seconds.",
-                        "mal_id": mal_id,
-                        "ep_number": ep_number,
-                        "status": "pending",
-                        "provider": "anizone",
-                        "available_episodes": available_episodes,
-                        "catalog_status": None,
-                    }
-                )
-            raise HTTPException(
-                status_code=404,
-                detail=f"Episode {ep_number} is not available yet. Latest found: {available_episodes}"
+        if should_refresh and not prefer == "reanime":
+            print(
+                f"[Streaming] Queueing AnimePahe discovery for {mal_id} Ep "
+                f"{animepahe_requested_episode} using title: {search_title}"
+            )
+            background_tasks.add_task(
+                refresh_animepahe_catalog,
+                mal_id,
+                search_title,
+                animepahe_requested_episode,
+            )
+            
+            pending_catalog_status = _build_catalog_status(mapping or animepahe_mapping, "animepahe")
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "detail": "AnimePahe stream is being fetched. Please refresh in a few seconds.",
+                    "mal_id": mal_id,
+                    "ep_number": ep_number,
+                    "status": "pending",
+                    "provider": "animepahe",
+                    "available_episodes": available_episodes,
+                    "catalog_status": pending_catalog_status.model_dump() if pending_catalog_status else None,
+                }
             )
 
-        print(f"[Streaming] Queueing AnimePahe discovery for {mal_id} Ep {ep_number} using title: {search_title}")
-        background_tasks.add_task(refresh_animepahe_catalog, mal_id, search_title, ep_number)
-        if prefer != "animepahe":
-            await _queue_anizone_episode(db, background_tasks, mal_id, search_title, ep_number)
-
-        pending_catalog_status = _build_catalog_status(mapping or animepahe_mapping, "animepahe")
-        return JSONResponse(
-            status_code=202,
-            content={
-                "detail": "AnimePahe stream is being fetched. Please refresh in a few seconds.",
-                "mal_id": mal_id,
-                "ep_number": ep_number,
-                "status": "pending",
-                "provider": "animepahe",
-                "available_episodes": available_episodes,
-                "catalog_status": pending_catalog_status.model_dump() if pending_catalog_status else None,
-            }
+        # --- Re:ANIME Discovery (Fallback) ---
+        print(f"[Streaming] AnimePahe discovery skipped/failed. Trying Re:ANIME fallback for {search_title}...")
+        reanime_slug = await search_reanime_by_title(search_title, mal_id)
+        if reanime_slug:
+            results = await scrape_reanime_episode(reanime_slug, mal_id, ep_number)
+            if results:
+                stream_data = results[0]
+                print(f"[Streaming] Discovered Re:ANIME stream for {mal_id} Ep {ep_number}")
+                return StreamResponse(
+                    mal_id=mal_id,
+                    ep_number=ep_number,
+                    stream_url=stream_data.get("stream_url"),
+                    embed_url=stream_data.get("embed_url"),
+                    subtitles=stream_data.get("subtitles", []),
+                    provider="reanime",
+                    available_episodes=await _get_latest_episode_number(db, mal_id, "reanime"),
+                    referer_url=stream_data.get("referer_url"),
+                    catalog_status=None
+                )
+        
+        raise HTTPException(
+            status_code=404,
+            detail=f"Episode {ep_number} is not available yet. Latest found on primary source: {available_episodes}"
         )
         
     except HTTPException:

@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 import CommentSection from "@/components/CommentSection";
 import AuthModal from "@/components/AuthModal";
@@ -8,6 +7,7 @@ import { isFavorited, toggleFavorite } from "@/lib/api";
 import { clearAuth, getStoredUser, isLoggedIn } from "@/lib/auth";
 import type { User } from "@/lib/auth";
 import type { Anime, AnimeDetail } from "@/lib/types";
+import LoadingLink from "@/components/LoadingLink";
 
 interface WatchCommunityProps {
     animeId: number;
@@ -155,10 +155,11 @@ export default function WatchCommunity({ animeId, episode = 0, title, imageUrl, 
                     </div>
                     <div className="watch-community-trending-list">
                         {trendingItems.slice(0, visibleTrending).map((item) => (
-                            <Link
+                            <LoadingLink
                                 key={item.id}
                                 href={`/watch/${item.mal_id || item.id}/1`}
                                 className="watch-community-trending-card"
+                                loadingMessage={`Loading ${item.title_english || item.title}...`}
                             >
                                 <img
                                     src={item.image_url || item.large_image_url || "/file.svg"}
@@ -173,7 +174,7 @@ export default function WatchCommunity({ animeId, episode = 0, title, imageUrl, 
                                         {item.year ? ` · ${item.year}` : ""}
                                     </p>
                                 </div>
-                            </Link>
+                            </LoadingLink>
                         ))}
                     </div>
                     {visibleTrending < trendingItems.length && (

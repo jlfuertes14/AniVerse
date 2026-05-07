@@ -72,6 +72,25 @@ html[data-theme="light"] .toast {
   color: var(--gold);
 }
 
+.toast-loading {
+  border-left-color: var(--gold);
+}
+
+.toast-loading .toast-content {
+  color: var(--text-primary);
+}
+
+.toast-spinner {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 2px solid color-mix(in srgb, var(--gold) 22%, transparent);
+  border-top-color: var(--gold);
+  border-right-color: var(--gold);
+  flex: 0 0 auto;
+  animation: toast-spin 0.8s linear infinite;
+}
+
 .toast-success {
   border-left-color: var(--green-cta);
 }
@@ -110,5 +129,14 @@ html[data-theme="dark"] .toast-close:hover {
   to {
     transform: translateX(0) scale(1);
     opacity: 1;
+  }
+}
+
+@keyframes toast-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
   }
 }

@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import Link from "next/link";
 import type { Anime } from "@/lib/types";
+import LoadingLink from "@/components/LoadingLink";
 
 interface SpotlightHeroProps {
     spotlightAnime: Anime[];
@@ -89,13 +89,14 @@ export default function SpotlightHero({ spotlightAnime, onExplore, onDetail }: S
                         </p>
 
                         <div className="spotlight-actions">
-                            <Link 
+                            <LoadingLink 
                                 href={`/watch/${anime.mal_id || anime.id}/1`} 
                                 className="btn-explore"
+                                loadingMessage={`Loading ${anime.title_english || anime.title}...`}
                             >
                                 <span className="btn-explore-icon">▶</span>
                                 Watch Now
-                            </Link>
+                            </LoadingLink>
                             <button className="btn-detail" onClick={() => onDetail(anime)}>
                                 Detail ▸
                             </button>

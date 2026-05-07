@@ -98,6 +98,22 @@ MEDIA_FIELDS = """
 """
 
 
+async def get_anilist_id_by_mal_id(mal_id: int) -> int | None:
+    """Resolve AniList ID from MAL ID."""
+    query_str = """
+    query ($malId: Int) {
+        Media(idMal: $malId, type: ANIME) {
+            id
+        }
+    }
+    """
+    try:
+        data = await _query(query_str, {"malId": mal_id})
+        return data.get("data", {}).get("Media", {}).get("id")
+    except:
+        return None
+
+
 async def get_airing_schedule_by_mal_id(mal_id: int) -> dict:
     """Get AniList airing metadata for a MAL ID."""
     query_str = """

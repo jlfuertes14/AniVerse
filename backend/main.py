@@ -18,7 +18,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.routers import anime, screenshot, filters, ai, auth, user, comments, streaming, banners, proxy
-from backend.services import animepahe_service, recommendation_engine, schedule_service
+from backend.services import animepahe_service, recommendation_engine, schedule_service, reanime_service
 from backend.database import init_db
 
 
@@ -29,12 +29,14 @@ async def lifespan(app: FastAPI):
     print("[AI] Building recommendation model in background...")
     recommendation_task = asyncio.create_task(recommendation_engine.build_model(count=200))
     scheduler_task = asyncio.create_task(animepahe_service.animepahe_catalog_scheduler())
-    latest_releases_task = asyncio.create_task(animepahe_service.latest_releases_scheduler())
+    animepahe_latest_releases_task = asyncio.create_task(animepahe_service.latest_releases_scheduler())
+    reanime_latest_releases_task = asyncio.create_task(reanime_service.latest_releases_scheduler())
     schedule_task = asyncio.create_task(schedule_service.schedule_scheduler())
     yield
     recommendation_task.cancel()
     scheduler_task.cancel()
-    latest_releases_task.cancel()
+    animepahe_latest_releases_task.cancel()
+    reanime_latest_releases_task.cancel()
     schedule_task.cancel()
     print("[AI] Shutting down.")
 

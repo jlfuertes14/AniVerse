@@ -13,8 +13,11 @@ router = APIRouter(prefix="/anime", tags=["anime"])
 
 
 @router.get("/latest")
-async def get_latest():
-    """Get latest releases from AnimePahe."""
+async def get_latest(prefer: Optional[str] = Query("animepahe", description="animepahe or reanime")):
+    """Get latest releases from the preferred provider."""
+    if prefer == "reanime":
+        from backend.services import reanime_service
+        return await reanime_service.get_latest_releases()
     return await animepahe_service.get_latest_releases()
 
 

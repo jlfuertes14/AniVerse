@@ -1,10 +1,11 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import TheaterPlayer from "@/components/TheaterPlayer";
 import type { Anime, AnimeDetail, StreamResponse } from "@/lib/types";
+import LoadingLink from "@/components/LoadingLink";
+import { useLoadingToast } from "@/components/LoadingToastProvider";
 
 interface WatchPlaybackClientProps {
     malId: string;
@@ -29,13 +30,14 @@ export default function WatchPlaybackClient({
 }: WatchPlaybackClientProps) {
     const router = useRouter();
     const searchParams = useSearchParams();
+    const { showLoading } = useLoadingToast();
     const autoNextTriggeredRef = useRef(false);
     const [episodeQuery, setEpisodeQuery] = useState("");
     const [rangeOverride, setRangeOverride] = useState<number | null>(null);
     const isFromLatest = searchParams.get("from") === "latest";
     const directParam = searchParams.get("direct");
     const forceDirectPlayback =
-        directParam === "1" || (streamData.provider === "anizone" && directParam !== "0");
+        directParam === "1" || (streamData.provider === "reanime" && directParam !== "0");
     const activeRangeIndex = rangeOverride ?? Math.floor((currentEpisode - 1) / 100);
     const hasNextEpisode = Boolean(totalEpisodes && currentEpisode < totalEpisodes);
 
@@ -58,6 +60,7 @@ export default function WatchPlaybackClient({
     const navigateToEpisode = useCallback((episodeNumber: number) => {
         if (autoNextTriggeredRef.current) return;
         autoNextTriggeredRef.current = true;
+        showLoading(`Loading episode ${episodeNumber}...`);
 
         const nextUrl = `/watch/${malId}/${episodeNumber}`;
         if (typeof window !== "undefined" && window.location.pathname !== nextUrl) {
@@ -66,13 +69,14 @@ export default function WatchPlaybackClient({
         }
 
         router.push(nextUrl);
-    }, [malId, router]);
+    }, [malId, router, showLoading]);
 
-    const preferAnimepahe = useCallback(() => {
+    const switchProvider = useCallback((newProvider: string) => {
         const params = new URLSearchParams(searchParams.toString());
-        params.set("prefer", "animepahe");
+        params.set("prefer", newProvider);
+        showLoading(`Switching to ${newProvider === "reanime" ? "Re:ANIME" : "AnimePahe"}...`);
         router.push(`/watch/${malId}/${currentEpisode}?${params.toString()}`);
-    }, [currentEpisode, malId, router, searchParams]);
+    }, [currentEpisode, malId, router, searchParams, showLoading]);
 
     return (
         <div className="watch-playback-container" suppressHydrationWarning={true}>
@@ -102,14 +106,15 @@ export default function WatchPlaybackClient({
                     <div className="watch-episode-list-container">
                         <div className="watch-episode-list">
                             {filteredEpisodes.map((epNum) => (
-                                <Link
+                                <LoadingLink
                                     key={epNum}
                                     href={`/watch/${malId}/${epNum}`}
                                     className={`watch-episode-btn ${epNum === currentEpisode ? "active" : ""} ${epNum === currentEpisode && isFromLatest ? "highlight-latest" : ""}`}
                                     aria-current={epNum === currentEpisode ? "true" : undefined}
+                                    loadingMessage={`Loading episode ${epNum}...`}
                                 >
                                     {String(epNum)}
-                                </Link>
+                                </LoadingLink>
                             ))}
                         </div>
                         {filteredEpisodes.length === 0 && (
@@ -138,21 +143,26 @@ export default function WatchPlaybackClient({
                         <div className="watch-meta-chip">
                             <span className="icon">SUB</span> EN
                         </div>
-                        <div className="watch-meta-chip">
-                            <span className="icon">SERVER:</span> {streamData.provider.toUpperCase()}
+                        <div className="watch-meta-chip server-selector">
+                            <span className="icon">SERVER:</span>
+                            <button
+                                type="button"
+                                className={`server-btn ${streamData.provider === "animepahe" ? "active" : ""}`}
+                                onClick={() => switchProvider("animepahe")}
+                            >
+                                PAHE
+                            </button>
+                            <button
+                                type="button"
+                                className={`server-btn ${streamData.provider === "reanime" ? "active" : ""}`}
+                                onClick={() => switchProvider("reanime")}
+                            >
+                                RE:ANIME
+                            </button>
                         </div>
                         <div className="watch-meta-chip">
                             <span className="icon">QUALITY:</span> 1080P
                         </div>
-                        {streamData.provider === "anizone" && (
-                            <button
-                                type="button"
-                                className="watch-meta-chip"
-                                onClick={preferAnimepahe}
-                            >
-                                Try AnimePahe
-                            </button>
-                        )}
                     </div>
 
                     {hasNextEpisode && (
@@ -184,10 +194,11 @@ export default function WatchPlaybackClient({
                     <h3>Episode Guide</h3>
                     <div className="watch-ep-scroll">
                         {episodeItems.map((epNum) => (
-                            <Link
+                            <LoadingLink
                                 key={epNum}
                                 href={`/watch/${malId}/${epNum}`}
                                 className={`watch-ep-card ${epNum === currentEpisode ? "active" : ""}`}
+                                loadingMessage={`Loading episode ${epNum}...`}
                             >
                                 <div className={`watch-ep-thumb ${epNum === currentEpisode ? "active" : ""}`}>
                                     <img src={thumbnailUrl} alt={`Episode ${epNum}`} loading="lazy" />
@@ -195,7 +206,7 @@ export default function WatchPlaybackClient({
                                 </div>
                                 <div className="watch-ep-label">Episode {epNum}</div>
                                 <div className="watch-ep-indicator"></div>
-                            </Link>
+                            </LoadingLink>
                         ))}
                     </div>
                 </section>
@@ -205,10 +216,11 @@ export default function WatchPlaybackClient({
                     <h3>YOU MIGHT ALSO LIKE</h3>
                     <div className="watch-related-list-mobile">
                         {relatedItems.map((item) => (
-                            <Link
+                            <LoadingLink
                                 key={item.id}
                                 href={`/watch/${item.mal_id || item.id}/1`}
                                 className="watch-mobile-card"
+                                loadingMessage={`Loading ${item.title_english || item.title}...`}
                             >
                                 <div className="watch-mobile-thumb">
                                     <img
@@ -229,7 +241,7 @@ export default function WatchPlaybackClient({
                                     </div>
                                 </div>
                                 <div className="watch-mobile-play">▶</div>
-                            </Link>
+                            </LoadingLink>
                         ))}
                     </div>
                 </section>
@@ -247,10 +259,11 @@ export default function WatchPlaybackClient({
                             <div className="watch-related-empty">No related titles yet.</div>
                         )}
                         {relatedItems.map((item) => (
-                            <Link
+                            <LoadingLink
                                 href={`/watch/${item.mal_id || item.id}/1`}
                                 className="watch-related-card"
                                 key={item.id}
+                                loadingMessage={`Loading ${item.title_english || item.title}...`}
                             >
                                 <img
                                     src={item.image_url || item.large_image_url || "/file.svg"}
@@ -264,7 +277,7 @@ export default function WatchPlaybackClient({
                                         {item.year ? ` · ${item.year}` : ""}
                                     </p>
                                 </div>
-                            </Link>
+                            </LoadingLink>
                         ))}
                     </div>
                 </div>

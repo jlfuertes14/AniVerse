@@ -73,8 +73,8 @@ export default function TheaterPlayer({
         if (provider === "animepahe" || streamUrl?.includes("owocdn.top") || streamUrl?.includes("kwik.cx")) {
             return "https://kwik.cx/";
         }
-        if (provider === "anizone") {
-            return "https://anizone.to/";
+        if (provider === "reanime") {
+            return "https://reanime.to/";
         }
         return getSiteReferer(embedUrl) || getSiteReferer(streamUrl);
     }, [embedUrl, refererUrl, streamUrl, provider]);
@@ -97,7 +97,7 @@ export default function TheaterPlayer({
     const useHlsPlayback = useMemo(() => isHlsStream(streamUrl), [streamUrl]);
     const hasEmbedPlayback = Boolean(embedUrl);
     const hasDirectPlayback = Boolean(resolvedStreamUrl);
-    const preferEmbedPlayback = provider === "animepahe" && hasEmbedPlayback;
+    const preferEmbedPlayback = (provider === "animepahe" || provider === "reanime") && hasEmbedPlayback;
     const activePlaybackMode =
         playbackMode === "embed" && hasEmbedPlayback
             ? "embed"
@@ -377,7 +377,7 @@ export default function TheaterPlayer({
                                 className={`watch-control-btn ${activePlaybackMode === "embed" ? "active" : ""}`}
                                 onClick={() => setPlaybackMode("embed")}
                             >
-                                Kwik Embed
+                                {provider === "reanime" ? "FlixCloud Embed" : "Kwik Embed"}
                             </button>
                         )}
                         <button

@@ -6,7 +6,8 @@ import os
 
 # Ensure Playwright uses a project-local browser cache on Render
 _playwright_cache = os.path.join(os.path.dirname(__file__), ".playwright")
-os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", _playwright_cache)
+if os.path.exists(_playwright_cache):
+    os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", _playwright_cache)
 
 from playwright.async_api import async_playwright
 
@@ -25,70 +26,6 @@ def _log(*args, **kwargs):
     print(*args, **kwargs)
 
 
-# ═══════════════════════════════════════════════════════════════
-#  AniZone Scraper (Playwright — direct HLS extraction)
-# ═══════════════════════════════════════════════════════════════
-
-async def scrape_anizone(url: str):
-    """Scrapes raw HLS links from AniZone's Vidstack player."""
-    _log(f"[AniZone] Starting scraper for: {url}")
-    scraped_data = {"anime_url": url, "episodes": [], "provider": "anizone"}
-
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        )
-        page = await context.new_page()
-
-        try:
-            await page.goto(url, wait_until="domcontentloaded")
-            episode_selector = "a.snap-start"
-            await page.wait_for_selector(episode_selector, timeout=15000)
-
-            ep_elements = await page.locator(episode_selector).all()
-            episode_targets = []
-            for el in ep_elements:
-                href = await el.get_attribute("href")
-                inner_text = await el.inner_text()
-                ep_number = inner_text.split('\n')[0].strip() if '\n' in inner_text else inner_text.strip()
-                if href:
-                    episode_targets.append({"ep_number": ep_number, "url": href})
-
-            _log(f"[AniZone] Found {len(episode_targets)} episodes")
-
-            for target in episode_targets:
-                await page.goto(target["url"], wait_until="domcontentloaded")
-                try:
-                    player = await page.wait_for_selector("media-player", timeout=10000)
-                    m3u8_url = await player.get_attribute("src")
-
-                    subtitles = []
-                    track_elements = await page.locator("media-player track").all()
-                    for track in track_elements:
-                        kind = await track.get_attribute("kind")
-                        if kind in ["subtitles", "captions"]:
-                            subtitles.append({
-                                "url": await track.get_attribute("src"),
-                                "label": await track.get_attribute("label"),
-                                "lang": await track.get_attribute("srclang")
-                            })
-
-                    if m3u8_url and ".m3u8" in m3u8_url:
-                        scraped_data["episodes"].append({
-                            "ep_number": target["ep_number"],
-                            "stream_url": m3u8_url,
-                            "subtitles": subtitles
-                        })
-                        _log(f"  -> Ep {target['ep_number']}: OK")
-                except Exception as e:
-                    _log(f"  -> Failed Ep {target['ep_number']}: {e}")
-                await page.wait_for_timeout(500)
-        except Exception as e:
-            _log(f"[AniZone] Error: {e}")
-        finally:
-            await browser.close()
-    return scraped_data
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -596,6 +533,153 @@ async def scrape_animepahe_latest(pages: int = 3) -> list:
     return latest_releases
 
 
+async def scrape_reanime_latest() -> list:
+    """Scrapes the latest releases from the Re:ANIME homepage."""
+    _log("[Re:ANIME] Scraping latest releases")
+    latest_releases = []
+    
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
+        )
+        page = await context.new_page()
+        
+        try:
+            async def _extract_latest_cards():
+                return await page.evaluate("""() => {
+                    const results = [];
+                    const toAbsoluteUrl = (value) => {
+                        if (!value) return '';
+                        try {
+                            return new URL(value, window.location.origin).href;
+                        } catch {
+                            return value;
+                        }
+                    };
+
+                    const getSnapshot = (card) => {
+                        const imgEl = card.querySelector('img');
+                        if (imgEl) {
+                            const direct =
+                                imgEl.currentSrc ||
+                                imgEl.getAttribute('src') ||
+                                imgEl.getAttribute('data-src') ||
+                                imgEl.getAttribute('data-lazy-src') ||
+                                imgEl.getAttribute('data-image') ||
+                                imgEl.getAttribute('data-original') ||
+                                imgEl.getAttribute('data-src-img') ||
+                                '';
+                            if (direct) return toAbsoluteUrl(direct);
+
+                            const srcset =
+                                imgEl.getAttribute('srcset') ||
+                                imgEl.getAttribute('data-srcset') ||
+                                '';
+                            if (srcset) {
+                                const first = srcset.split(',')[0]?.trim().split(' ')[0];
+                                if (first) return toAbsoluteUrl(first);
+                            }
+                        }
+
+                        const posterEl = card.querySelector('[style*="background-image"]');
+                        const bg = posterEl instanceof HTMLElement ? posterEl.style.backgroundImage : '';
+                        const bgMatch = bg ? bg.match(/url\\(["']?(.*?)["']?\\)/) : null;
+                        return bgMatch?.[1] ? toAbsoluteUrl(bgMatch[1]) : '';
+                    };
+
+                    const cards = Array.from(document.querySelectorAll('a[href*="/watch/"]'))
+                        .filter(a => {
+                            const href = a.getAttribute('href') || '';
+                            return href.includes('?ep=latest') || a.querySelector('h3');
+                        });
+                    
+                    for (const card of cards) {
+                        const href = card.getAttribute('href') || '';
+                        const slugMatch = href.match(/\\/watch\\/([^?]+)/);
+                        if (!slugMatch) continue;
+                        const slug = slugMatch[1];
+                        
+                        const titleEl = card.querySelector('h3');
+                        if (!titleEl) continue;
+                        const title = titleEl.innerText.trim();
+                        const snapshot = getSnapshot(card);
+                        
+                        let epNum = '1';
+                        const subBadge = card.querySelector('[title="Subbed Episodes"]');
+                        if (subBadge) {
+                            epNum = subBadge.innerText.trim();
+                        } else {
+                            const badges = card.querySelectorAll('span');
+                            for (const b of badges) {
+                                if (/^\\d+$/.test(b.innerText.trim())) {
+                                    epNum = b.innerText.trim();
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        if (results.some(r => r.slug === slug)) continue;
+
+                        results.push({
+                            title: title,
+                            slug: slug,
+                            snapshot: snapshot,
+                            episode: epNum,
+                            provider: 'reanime'
+                        });
+
+                        if (results.length >= 12) break;
+                    }
+                    return results;
+                }""")
+
+            async def _block_heavy_requests(route):
+                resource_type = route.request.resource_type
+                if resource_type in {"media", "font"}:
+                    await route.abort()
+                    return
+                await route.continue_()
+
+            await page.route("**/*", _block_heavy_requests)
+            await page.goto("https://reanime.to/home", wait_until="domcontentloaded", timeout=20000)
+
+            # Give the SPA time to hydrate and inject release cards.
+            try:
+                await page.wait_for_function(
+                    "() => document.querySelectorAll('a[href*=\"/watch/\"]').length >= 6",
+                    timeout=18000,
+                )
+            except Exception:
+                await page.wait_for_timeout(5000)
+
+            for attempt in range(3):
+                if attempt > 0:
+                    await page.wait_for_timeout(1500 * attempt)
+
+                latest_releases = await _extract_latest_cards()
+                snapshot_count = sum(1 for item in latest_releases if item.get("snapshot"))
+                _log(
+                    f"[Re:ANIME] Latest scrape attempt {attempt + 1}: "
+                    f"{len(latest_releases)} cards, {snapshot_count} snapshots"
+                )
+
+                if latest_releases and (snapshot_count >= min(len(latest_releases), 8) or attempt == 2):
+                    break
+
+                await page.mouse.wheel(0, 1200)
+                await page.wait_for_timeout(1200)
+                await page.mouse.wheel(0, -800)
+
+            _log(f"[Re:ANIME] Found {len(latest_releases)} total latest releases")
+        except Exception as e:
+            _log(f"[Re:ANIME] Latest releases scrape error: {e}")
+        finally:
+            await browser.close()
+            
+    return latest_releases
+
+
 # ═══════════════════════════════════════════════════════════════
 #  CLI Test Interface
 # ═══════════════════════════════════════════════════════════════
@@ -614,11 +698,11 @@ if __name__ == "__main__":
     elif len(sys.argv) > 1 and sys.argv[1] == "latest":
         result = asyncio.run(scrape_animepahe_latest())
         print(json.dumps(result))
+    elif len(sys.argv) > 1 and sys.argv[1] == "reanime_latest":
+        result = asyncio.run(scrape_reanime_latest())
+        print(json.dumps(result))
     else:
-        target_url = sys.argv[2] if len(sys.argv) > 2 else "https://anizone.to/anime/zopo98pd"
-        result = asyncio.run(scrape_anizone(target_url))
-        print("\n--- SCRAPE COMPLETE ---")
-        print(json.dumps(result, indent=4))
+        _log("Usage: python scraper.py <animepahe|latest|reanime_latest> [params]")
 
 # ═══════════════════════════════════════════════════════════════
 #  AnimeSchedule.net Scraper
