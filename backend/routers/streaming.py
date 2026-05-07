@@ -113,12 +113,16 @@ async def _queue_anizone_episode(db, background_tasks: BackgroundTasks, mal_id: 
     return True
 
 
-async def _get_available_episode_count(db, mal_id: int, source: str | None = None) -> int:
+async def _get_latest_episode_number(db, mal_id: int, source: str | None = None) -> int:
     query = {"anilist_id": mal_id}
     if source:
         query["source"] = source
 
-    return await db["streams"].count_documents(query)
+    latest = await db["streams"].find_one(query, sort=[("episode", -1)])
+    try:
+        return int(latest.get("episode", 0)) if latest else 0
+    except (TypeError, ValueError):
+        return 0
 
 
 def _build_catalog_status(mapping: dict | None, provider: str = "animepahe") -> CatalogStatus | None:
@@ -217,11 +221,12 @@ async def get_episode_stream(mal_id: int, ep_number: int, background_tasks: Back
                 embed_url=e_url,
                 subtitles=stream_data.get("subtitles", []),
                 provider=stream_data.get("source", "unknown"),
-                available_episodes=await _get_available_episode_count(
+                available_episodes=await _get_latest_episode_number(
                     db,
                     mal_id,
                     stream_data.get("source")
                 ),
+                referer_url=stream_data.get("referer_url"),
                 catalog_status=_build_catalog_status(animepahe_mapping, "animepahe")
                 if stream_data.get("source") == "animepahe"
                 else None,

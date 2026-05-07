@@ -7,6 +7,7 @@ import type { SubtitleTrack } from "@/lib/types";
 interface TheaterPlayerProps {
     embedUrl?: string;
     streamUrl?: string;
+    refererUrl?: string;
     subtitles?: SubtitleTrack[];
     thumbnailUrl?: string;
     title?: string;
@@ -44,6 +45,7 @@ export default function TheaterPlayer({
     embedUrl,
     streamUrl,
     subtitles = [],
+    refererUrl,
     thumbnailUrl,
     title,
     provider,
@@ -59,6 +61,9 @@ export default function TheaterPlayer({
     const [playbackMode, setPlaybackMode] = useState<"embed" | "direct">("direct");
 
     const streamReferer = useMemo(() => {
+        if (refererUrl) {
+            return refererUrl;
+        }
         if (provider === "animepahe" || streamUrl?.includes("owocdn.top") || streamUrl?.includes("kwik.cx")) {
             return "https://kwik.cx/";
         }
@@ -66,7 +71,7 @@ export default function TheaterPlayer({
             return "https://anizone.to/";
         }
         return getSiteReferer(embedUrl) || getSiteReferer(streamUrl);
-    }, [embedUrl, streamUrl, provider]);
+    }, [embedUrl, refererUrl, streamUrl, provider]);
 
     const proxiedStreamUrl = useMemo(() => {
         if (!streamUrl) return "";

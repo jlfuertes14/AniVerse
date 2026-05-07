@@ -86,6 +86,7 @@ export interface StreamResponse {
     ep_number: number;
     embed_url?: string;
     stream_url?: string;
+    referer_url?: string;
     subtitles?: SubtitleTrack[];
     provider: string;
     available_episodes?: number;

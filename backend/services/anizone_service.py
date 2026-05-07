@@ -123,7 +123,8 @@ async def scrape_anizone_anime(url: str, mal_id: int):
                     "source": "anizone",
                     "stream_url": ep.get("stream_url"),
                     "subtitles": ep.get("subtitles", []),
-                    "updated_at": "resolved"
+                    "updated_at": "resolved",
+                    "referer_url": ep.get("referer_url"),
                 }},
                 upsert=True
             )
@@ -159,7 +160,8 @@ async def scrape_anizone_episode(url: str, mal_id: int, ep_number: int):
                     "source": "anizone",
                     "stream_url": ep.get("stream_url"),
                     "subtitles": ep.get("subtitles", []),
-                    "updated_at": "resolved"
+                    "updated_at": "resolved",
+                    "referer_url": ep.get("referer_url"),
                 }},
                 upsert=True
             )

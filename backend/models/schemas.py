@@ -95,6 +95,7 @@ class StreamResponse(BaseModel):
     ep_number: int
     embed_url: Optional[str] = None  # Legacy iframe support
     stream_url: Optional[str] = None  # Native HLS support
+    referer_url: Optional[str] = None
     subtitles: list[SubtitleTrack] = []
     provider: str
     available_episodes: Optional[int] = None

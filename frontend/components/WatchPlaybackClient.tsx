@@ -114,6 +114,7 @@ export default function WatchPlaybackClient({
                 <TheaterPlayer
                     embedUrl={streamData.embed_url}
                     streamUrl={streamData.stream_url}
+                    refererUrl={streamData.referer_url}
                     subtitles={streamData.subtitles}
                     provider={streamData.provider}
                     thumbnailUrl={thumbnailUrl}

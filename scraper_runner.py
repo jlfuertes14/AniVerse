@@ -251,7 +251,8 @@ async def anizone_scrape(url: str) -> dict | None:
                             "ep_number": ep_num,
                             "stream_url": m3u8_url,
                             "subtitles": subtitles,
-                            "provider": "anizone"
+                            "provider": "anizone",
+                            "referer_url": target["url"],
                         })
                         log(f"  -> Ep {target['number']}: OK")
                 except Exception as e:
@@ -305,7 +306,8 @@ async def anizone_scrape_episode(url: str, episode_number: int) -> dict | None:
                         "ep_number": int(episode_number),
                         "stream_url": m3u8_url,
                         "subtitles": subtitles,
-                        "provider": "anizone"
+                        "provider": "anizone",
+                        "referer_url": episode_url,
                     }]
                 }
         except Exception as e:
