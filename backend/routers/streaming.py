@@ -146,7 +146,12 @@ def _build_catalog_status(mapping: dict | None, provider: str = "animepahe") -> 
 
 
 @router.get("/{mal_id}/{ep_number}", response_model=StreamResponse)
-async def get_episode_stream(mal_id: int, ep_number: int, background_tasks: BackgroundTasks):
+async def get_episode_stream(
+    mal_id: int,
+    ep_number: int,
+    background_tasks: BackgroundTasks,
+    prefer: str | None = None,
+):
     """Resolve a streaming URL (iframe or HLS) for a given MAL ID and episode."""
     db = get_db()
     
@@ -168,8 +173,16 @@ async def get_episode_stream(mal_id: int, ep_number: int, background_tasks: Back
     stream_candidates = await db["streams"].find(
         {"anilist_id": mal_id, "episode": {"$in": search_numbers}}
     ).to_list(length=20)
-    
-    stream_data = _sort_stream_candidates(stream_candidates)[0] if stream_candidates else None
+
+    preferred = []
+    if prefer in {"animepahe", "anizone"}:
+        preferred = [record for record in stream_candidates if record.get("source") == prefer]
+
+    stream_data = None
+    if preferred:
+        stream_data = _sort_stream_candidates(preferred)[0]
+    elif stream_candidates:
+        stream_data = _sort_stream_candidates(stream_candidates)[0]
     
     # If we found a record, use its episode number (might be the mapped one)
     resolved_ep = stream_data["episode"] if stream_data else ep_number
@@ -264,7 +277,8 @@ async def get_episode_stream(mal_id: int, ep_number: int, background_tasks: Back
         available_episodes = int(mapping.get("latest_episode", 0)) if mapping else 0
 
         if is_animepahe_refresh_in_progress(mal_id):
-            await _queue_anizone_episode(db, background_tasks, mal_id, search_title, ep_number)
+            if prefer != "animepahe":
+                await _queue_anizone_episode(db, background_tasks, mal_id, search_title, ep_number)
             pending_catalog_status = _build_catalog_status(mapping or animepahe_mapping, "animepahe")
             return JSONResponse(
                 status_code=202,
@@ -280,7 +294,9 @@ async def get_episode_stream(mal_id: int, ep_number: int, background_tasks: Back
             )
 
         if not should_refresh:
-            anizone_queued = await _queue_anizone_episode(db, background_tasks, mal_id, search_title, ep_number)
+            anizone_queued = False
+            if prefer != "animepahe":
+                anizone_queued = await _queue_anizone_episode(db, background_tasks, mal_id, search_title, ep_number)
             if anizone_queued:
                 return JSONResponse(
                     status_code=202,
@@ -301,7 +317,8 @@ async def get_episode_stream(mal_id: int, ep_number: int, background_tasks: Back
 
         print(f"[Streaming] Queueing AnimePahe discovery for {mal_id} Ep {ep_number} using title: {search_title}")
         background_tasks.add_task(refresh_animepahe_catalog, mal_id, search_title, ep_number)
-        await _queue_anizone_episode(db, background_tasks, mal_id, search_title, ep_number)
+        if prefer != "animepahe":
+            await _queue_anizone_episode(db, background_tasks, mal_id, search_title, ep_number)
 
         pending_catalog_status = _build_catalog_status(mapping or animepahe_mapping, "animepahe")
         return JSONResponse(

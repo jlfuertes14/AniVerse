@@ -20,8 +20,13 @@ function isPendingStreamState(
     return Boolean(streamData && "isScraping" in streamData);
 }
 
-async function getStreamData(malId: string, ep: string): Promise<StreamResponse | PendingStreamState | null> {
-    const res = await fetch(`${API_BASE}/stream/${malId}/${ep}`, {
+async function getStreamData(
+    malId: string,
+    ep: string,
+    prefer?: string,
+): Promise<StreamResponse | PendingStreamState | null> {
+    const query = prefer ? `?prefer=${encodeURIComponent(prefer)}` : "";
+    const res = await fetch(`${API_BASE}/stream/${malId}/${ep}${query}`, {
         cache: "no-store",
     });
     if (res.status === 202) {
@@ -74,12 +79,19 @@ function buildEpisodeList(total: number, current: number): number[] {
     return Array.from({ length: total }, (_, i) => i + 1);
 }
 
-export default async function WatchPage({ params }: { params: Promise<{ mal_id: string; ep: string }> }) {
+export default async function WatchPage({
+    params,
+    searchParams,
+}: {
+    params: Promise<{ mal_id: string; ep: string }>;
+    searchParams?: { prefer?: string };
+}) {
     const resolvedParams = await params;
     const { mal_id, ep } = resolvedParams;
+    const preferProvider = searchParams?.prefer;
 
     const [streamData, anime, aiRelated, trendingItems] = await Promise.all([
-        getStreamData(mal_id, ep),
+        getStreamData(mal_id, ep, preferProvider),
         getAnimeData(mal_id),
         getRelatedRecommendations(mal_id),
         getTrendingItems(),

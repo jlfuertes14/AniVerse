@@ -33,7 +33,9 @@ export default function WatchPlaybackClient({
     const [episodeQuery, setEpisodeQuery] = useState("");
     const [rangeOverride, setRangeOverride] = useState<number | null>(null);
     const isFromLatest = searchParams.get("from") === "latest";
-    const forceDirectPlayback = searchParams.get("direct") === "1";
+    const directParam = searchParams.get("direct");
+    const forceDirectPlayback =
+        directParam === "1" || (streamData.provider === "anizone" && directParam !== "0");
     const activeRangeIndex = rangeOverride ?? Math.floor((currentEpisode - 1) / 100);
     const hasNextEpisode = Boolean(totalEpisodes && currentEpisode < totalEpisodes);
 
@@ -65,6 +67,12 @@ export default function WatchPlaybackClient({
 
         router.push(nextUrl);
     }, [malId, router]);
+
+    const preferAnimepahe = useCallback(() => {
+        const params = new URLSearchParams(searchParams.toString());
+        params.set("prefer", "animepahe");
+        router.push(`/watch/${malId}/${currentEpisode}?${params.toString()}`);
+    }, [currentEpisode, malId, router, searchParams]);
 
     return (
         <div className="watch-playback-container" suppressHydrationWarning={true}>
@@ -136,6 +144,15 @@ export default function WatchPlaybackClient({
                         <div className="watch-meta-chip">
                             <span className="icon">QUALITY:</span> 1080P
                         </div>
+                        {streamData.provider === "anizone" && (
+                            <button
+                                type="button"
+                                className="watch-meta-chip"
+                                onClick={preferAnimepahe}
+                            >
+                                Try AnimePahe
+                            </button>
+                        )}
                     </div>
 
                     {hasNextEpisode && (
