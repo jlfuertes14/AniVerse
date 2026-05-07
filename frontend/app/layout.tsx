@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import "./toast.css";
 
@@ -27,6 +27,12 @@ export const metadata: Metadata = {
     description: "Watch free anime online in HD and discover your next obsession by vibe.",
     type: "website",
   },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
 };
 
 export default function RootLayout({

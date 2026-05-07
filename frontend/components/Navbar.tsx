@@ -56,9 +56,11 @@ export default function Navbar({
     const [isSearchingSuggestions, setIsSearchingSuggestions] = useState(false);
     const [showUserMenu, setShowUserMenu] = useState(false);
     const [theme, setTheme] = useState<"dark" | "light">("dark");
+    const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const debounceRef = useRef<NodeJS.Timeout | null>(null);
     const menuRef = useRef<HTMLDivElement>(null);
     const searchRef = useRef<HTMLDivElement>(null);
+    const mobileMenuRef = useRef<HTMLDivElement>(null);
 
     const handleInput = (value: string) => {
         setQuery(value);
@@ -118,10 +120,18 @@ export default function Navbar({
             if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
                 setShowSuggestions(false);
             }
+            if (
+                isMobileMenuOpen &&
+                mobileMenuRef.current &&
+                !mobileMenuRef.current.contains(e.target as Node) &&
+                !(e.target as HTMLElement).closest(".navbar-mobile-toggle")
+            ) {
+                setIsMobileMenuOpen(false);
+            }
         };
         document.addEventListener("mousedown", handler);
         return () => document.removeEventListener("mousedown", handler);
-    }, []);
+    }, [isMobileMenuOpen]);
 
     useEffect(() => {
         return () => {
@@ -138,6 +148,14 @@ export default function Navbar({
         document.documentElement.dataset.theme = nextTheme;
     }, []);
 
+    useEffect(() => {
+        if (typeof document === "undefined") return;
+        document.body.style.overflow = isMobileMenuOpen ? "hidden" : "";
+        return () => {
+            document.body.style.overflow = "";
+        };
+    }, [isMobileMenuOpen]);
+
     const handleThemeToggle = () => {
         const nextTheme = theme === "dark" ? "light" : "dark";
         setTheme(nextTheme);
@@ -145,7 +163,92 @@ export default function Navbar({
         window.localStorage.setItem("aniverse-theme", nextTheme);
     };
 
+    const handleMobileAction = (action: () => void) => {
+        action();
+        setIsMobileMenuOpen(false);
+    };
+
+    const quickActions = (
+        onAction: (handler: () => void) => void,
+        className: string,
+    ) => (
+        <>
+            <button
+                className={`${className} ai-discovery-btn ${isAIActive ? "active" : ""}`}
+                onClick={() => onAction(onAISearchClick)}
+                title="AI Discovery Search"
+            >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+                    <path d="M5 3v4" />
+                    <path d="M3 5h4" />
+                    <path d="M21 17v4" />
+                    <path d="M19 19h4" />
+                </svg>
+                AI Search
+            </button>
+            <button
+                className={`${className} ${activeCategory === "tv" ? "active" : ""}`}
+                onClick={() => onAction(() => onCategoryClick("tv"))}
+            >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="2" y="7" width="20" height="15" rx="2" ry="2" />
+                    <polyline points="17 2 12 7 7 2" />
+                </svg>
+                TV
+            </button>
+            <button
+                className={`${className} ${activeCategory === "movie" ? "active" : ""}`}
+                onClick={() => onAction(() => onCategoryClick("movie"))}
+            >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" />
+                    <line x1="7" y1="2" x2="7" y2="22" />
+                    <line x1="17" y1="2" x2="17" y2="22" />
+                    <line x1="2" y1="12" x2="22" y2="12" />
+                    <line x1="2" y1="7" x2="7" y2="7" />
+                    <line x1="2" y1="17" x2="7" y2="17" />
+                    <line x1="17" y1="17" x2="22" y2="17" />
+                    <line x1="17" y1="7" x2="22" y2="7" />
+                </svg>
+                Movie
+            </button>
+            <button
+                className={`${className} ${showScreenshot ? "active" : ""}`}
+                onClick={() => onAction(onScreenshotClick)}
+            >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="3" y="3" width="18" height="18" rx="2" />
+                    <circle cx="8.5" cy="8.5" r="1.5" />
+                    <path d="M21 15l-5-5L5 21" />
+                </svg>
+                Screenshot
+            </button>
+            <button
+                className={`${className} ${isRandomActive ? "active" : ""}`}
+                onClick={() => onAction(onRandomClick)}
+            >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M16 3h5v5M4 20L20.2 3.8M21 16v5h-5M15 15l5.1 5.1M4 4l5 5" />
+                </svg>
+                Random
+            </button>
+            <button
+                className={`${className} ${activeVibe ? "active" : ""}`}
+                onClick={() => onAction(onVibesClick)}
+            >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M9 18V5l12-2v13" />
+                    <circle cx="6" cy="18" r="3" />
+                    <circle cx="18" cy="16" r="3" />
+                </svg>
+                Vibes
+            </button>
+        </>
+    );
+
     return (
+        <>
         <nav className="navbar">
             <div className="navbar-inner" suppressHydrationWarning>
                 <div className="navbar-logo" onClick={onLogoClick}>
@@ -156,6 +259,21 @@ export default function Navbar({
                     />
                     <span className="navbar-brand-text">AniVerse</span>
                 </div>
+
+                <button
+                    className="navbar-mobile-toggle"
+                    type="button"
+                    aria-expanded={isMobileMenuOpen}
+                    aria-controls="navbar-mobile-panel"
+                    onClick={() => setIsMobileMenuOpen((prev) => !prev)}
+                >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <line x1="3" y1="6" x2="21" y2="6" />
+                        <line x1="3" y1="12" x2="21" y2="12" />
+                        <line x1="3" y1="18" x2="21" y2="18" />
+                    </svg>
+                    Menu
+                </button>
 
                 <div className="navbar-search" ref={searchRef}>
                     <div className="navbar-search-box">
@@ -217,77 +335,7 @@ export default function Navbar({
                 </div>
 
                 <div className="navbar-quick-actions">
-                    <button 
-                        className={`navbar-link ai-discovery-btn ${isAIActive ? "active" : ""}`} 
-                        onClick={onAISearchClick}
-                        title="AI Discovery Search"
-                    >
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
-                            <path d="M5 3v4" />
-                            <path d="M3 5h4" />
-                            <path d="M21 17v4" />
-                            <path d="M19 19h4" />
-                        </svg>
-                        AI Search
-                    </button>
-                    <button 
-                        className={`navbar-link ${activeCategory === "tv" ? "active" : ""}`} 
-                        onClick={() => onCategoryClick("tv")}
-                    >
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <rect x="2" y="7" width="20" height="15" rx="2" ry="2" />
-                            <polyline points="17 2 12 7 7 2" />
-                        </svg>
-                        TV
-                    </button>
-                    <button 
-                        className={`navbar-link ${activeCategory === "movie" ? "active" : ""}`} 
-                        onClick={() => onCategoryClick("movie")}
-                    >
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" />
-                            <line x1="7" y1="2" x2="7" y2="22" />
-                            <line x1="17" y1="2" x2="17" y2="22" />
-                            <line x1="2" y1="12" x2="22" y2="12" />
-                            <line x1="2" y1="7" x2="7" y2="7" />
-                            <line x1="2" y1="17" x2="7" y2="17" />
-                            <line x1="17" y1="17" x2="22" y2="17" />
-                            <line x1="17" y1="7" x2="22" y2="7" />
-                        </svg>
-                        Movie
-                    </button>
-                    <button 
-                        className={`navbar-link ${showScreenshot ? "active" : ""}`} 
-                        onClick={onScreenshotClick}
-                    >
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <rect x="3" y="3" width="18" height="18" rx="2" />
-                            <circle cx="8.5" cy="8.5" r="1.5" />
-                            <path d="M21 15l-5-5L5 21" />
-                        </svg>
-                        Screenshot
-                    </button>
-                    <button 
-                        className={`navbar-link ${isRandomActive ? "active" : ""}`} 
-                        onClick={onRandomClick}
-                    >
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path d="M16 3h5v5M4 20L20.2 3.8M21 16v5h-5M15 15l5.1 5.1M4 4l5 5" />
-                        </svg>
-                        Random
-                    </button>
-                    <button 
-                        className={`navbar-link ${activeVibe ? "active" : ""}`} 
-                        onClick={onVibesClick}
-                    >
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path d="M9 18V5l12-2v13" />
-                            <circle cx="6" cy="18" r="3" />
-                            <circle cx="18" cy="16" r="3" />
-                        </svg>
-                        Vibes
-                    </button>
+                    {quickActions((handler) => handler(), "navbar-link")}
                 </div>
 
                 <div className="navbar-links">
@@ -358,5 +406,87 @@ export default function Navbar({
                 </div>
             </div>
         </nav>
+
+        <div
+            className={`navbar-mobile-overlay ${isMobileMenuOpen ? "open" : ""}`}
+            onClick={() => setIsMobileMenuOpen(false)}
+        />
+        <aside
+            className={`navbar-mobile-panel ${isMobileMenuOpen ? "open" : ""}`}
+            ref={mobileMenuRef}
+            id="navbar-mobile-panel"
+        >
+            <div className="navbar-mobile-header">
+                <div className="navbar-mobile-brand">
+                    <img
+                        src="/asuna-yuuki.png"
+                        alt="AniVerse Mascot"
+                        className="navbar-mobile-mascot"
+                    />
+                    <div className="navbar-mobile-brand-copy">
+                        <span className="navbar-mobile-brand-title">AniVerse</span>
+                        <span className="navbar-mobile-brand-subtitle">Discover anime faster</span>
+                    </div>
+                </div>
+                <button
+                    type="button"
+                    className="navbar-mobile-close"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                >
+                    ✕
+                </button>
+            </div>
+
+            <div className="navbar-mobile-section">
+                <div className="navbar-mobile-section-title">Explore</div>
+                <div className="navbar-mobile-actions">
+                    {quickActions(handleMobileAction, "navbar-mobile-link")}
+                </div>
+            </div>
+
+            <div className="navbar-mobile-section">
+                <div className="navbar-mobile-section-title">Theme</div>
+                <button
+                    className="navbar-mobile-link stacked"
+                    type="button"
+                    onClick={() => handleMobileAction(handleThemeToggle)}
+                >
+                    <span>{theme === "dark" ? "Light" : "Dark"}</span>
+                    <span className="navbar-mobile-subtext">Toggle theme</span>
+                </button>
+            </div>
+
+            <div className="navbar-mobile-section">
+                <div className="navbar-mobile-section-title">Account</div>
+                {currentUser ? (
+                    <>
+                        <button
+                            type="button"
+                            className="navbar-mobile-link stacked"
+                            onClick={() => handleMobileAction(onProfileClick)}
+                        >
+                            <span>My Profile</span>
+                            <span className="navbar-mobile-subtext">{currentUser.username}</span>
+                        </button>
+                        <button
+                            type="button"
+                            className="navbar-mobile-link danger"
+                            onClick={() => handleMobileAction(onLogout)}
+                        >
+                            Logout
+                        </button>
+                    </>
+                ) : (
+                    <button
+                        type="button"
+                        className="navbar-mobile-link"
+                        onClick={() => handleMobileAction(onLoginClick)}
+                    >
+                        Login
+                    </button>
+                )}
+            </div>
+        </aside>
+        </>
     );
 }
