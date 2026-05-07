@@ -14,6 +14,7 @@ interface TheaterPlayerProps {
     provider?: string;
     episodeNumber?: number;
     isFromLatest?: boolean;
+    forceDirectPlayback?: boolean;
 }
 
 function getSiteReferer(url?: string) {
@@ -55,6 +56,7 @@ export default function TheaterPlayer({
     provider,
     episodeNumber,
     isFromLatest = false,
+    forceDirectPlayback = false,
 }: TheaterPlayerProps) {
     const videoRef = useRef<HTMLVideoElement | null>(null);
     const hlsRef = useRef<Hls | null>(null);
@@ -77,21 +79,24 @@ export default function TheaterPlayer({
         return getSiteReferer(embedUrl) || getSiteReferer(streamUrl);
     }, [embedUrl, refererUrl, streamUrl, provider]);
 
-    const proxiedStreamUrl = useMemo(() => {
+    const resolvedStreamUrl = useMemo(() => {
         if (!streamUrl) return "";
+        if (forceDirectPlayback) return streamUrl;
         return buildProxyUrl(streamUrl, streamReferer);
-    }, [streamReferer, streamUrl]);
+    }, [forceDirectPlayback, streamReferer, streamUrl]);
 
     const proxiedSubtitles = useMemo(() => {
         return subtitles.map((subtitle) => ({
             ...subtitle,
-            proxiedUrl: subtitle.url ? buildProxyUrl(subtitle.url, streamReferer) : subtitle.url,
+            proxiedUrl: subtitle.url
+                ? (forceDirectPlayback ? subtitle.url : buildProxyUrl(subtitle.url, streamReferer))
+                : subtitle.url,
         }));
-    }, [streamReferer, subtitles]);
+    }, [forceDirectPlayback, streamReferer, subtitles]);
 
     const useHlsPlayback = useMemo(() => isHlsStream(streamUrl), [streamUrl]);
     const hasEmbedPlayback = Boolean(embedUrl);
-    const hasDirectPlayback = Boolean(proxiedStreamUrl);
+    const hasDirectPlayback = Boolean(resolvedStreamUrl);
     const preferEmbedPlayback = provider === "animepahe" && hasEmbedPlayback;
     const activePlaybackMode =
         playbackMode === "embed" && hasEmbedPlayback
@@ -134,7 +139,7 @@ export default function TheaterPlayer({
     }, [embedUrl, streamUrl]);
 
     useEffect(() => {
-        if (!playerActive || activePlaybackMode !== "direct" || !proxiedStreamUrl) return;
+        if (!playerActive || activePlaybackMode !== "direct" || !resolvedStreamUrl) return;
         const video = videoRef.current;
         if (!video) return;
 
@@ -192,7 +197,7 @@ export default function TheaterPlayer({
             cleanupVideo();
 
             if (!useHlsPlayback) {
-                video.src = proxiedStreamUrl;
+                video.src = resolvedStreamUrl;
                 try {
                     await video.play();
                 } catch {
@@ -202,7 +207,7 @@ export default function TheaterPlayer({
             }
 
             if (video.canPlayType("application/vnd.apple.mpegurl")) {
-                video.src = proxiedStreamUrl;
+                video.src = resolvedStreamUrl;
                 try {
                     await video.play();
                 } catch {
@@ -231,7 +236,7 @@ export default function TheaterPlayer({
 
                 hls.on(HlsCtor.Events.MEDIA_ATTACHED, () => {
                     if (cancelled) return;
-                    hls.loadSource(proxiedStreamUrl);
+                    hls.loadSource(resolvedStreamUrl);
                 });
 
                 hls.on(HlsCtor.Events.MANIFEST_PARSED, async () => {
@@ -280,7 +285,7 @@ export default function TheaterPlayer({
             hlsRef.current = null;
             cleanupVideo();
         };
-    }, [activePlaybackMode, playerActive, proxiedStreamUrl, useHlsPlayback]);
+    }, [activePlaybackMode, playerActive, resolvedStreamUrl, useHlsPlayback]);
 
     if (!playerActive) {
         return (
@@ -305,7 +310,7 @@ export default function TheaterPlayer({
         );
     }
 
-    if (activePlaybackMode === "direct" && proxiedStreamUrl) {
+    if (activePlaybackMode === "direct" && resolvedStreamUrl) {
         return (
             <div className="theater-player hls-mode">
                 <video

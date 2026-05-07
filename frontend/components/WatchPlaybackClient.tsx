@@ -33,6 +33,7 @@ export default function WatchPlaybackClient({
     const [episodeQuery, setEpisodeQuery] = useState("");
     const [rangeOverride, setRangeOverride] = useState<number | null>(null);
     const isFromLatest = searchParams.get("from") === "latest";
+    const forceDirectPlayback = searchParams.get("direct") === "1";
     const activeRangeIndex = rangeOverride ?? Math.floor((currentEpisode - 1) / 100);
     const hasNextEpisode = Boolean(totalEpisodes && currentEpisode < totalEpisodes);
 
@@ -121,6 +122,7 @@ export default function WatchPlaybackClient({
                     title={title}
                     episodeNumber={currentEpisode}
                     isFromLatest={isFromLatest}
+                    forceDirectPlayback={forceDirectPlayback}
                 />
 
                 <div className="watch-player-meta">
