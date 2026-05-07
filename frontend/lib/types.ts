@@ -144,7 +144,9 @@ export interface LatestRelease {
     display_episode?: string;
     snapshot: string;
     mal_id?: number;
-    session: string;
+    session?: string;
+    slug?: string;
+    episode_session?: string;
 }
 
 export interface AiringShow {
