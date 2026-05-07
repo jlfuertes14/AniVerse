@@ -89,9 +89,15 @@ export default async function WatchPage({ params }: { params: Promise<{ mal_id: 
     const thumbnailUrl = anime?.large_image_url || anime?.image_url || "";
     const currentEpisode = Number(ep);
     const normalizedEpisode = Number.isFinite(currentEpisode) && currentEpisode > 0 ? currentEpisode : 1;
-    const totalEpisodes = (streamData && typeof streamData.available_episodes === 'number' && streamData.available_episodes > 0)
+    const streamProvider = !isPendingStreamState(streamData) && streamData ? streamData.provider : null;
+    const streamAvailableEpisodes = !isPendingStreamState(streamData) && streamData
         ? streamData.available_episodes
-        : (anime?.episodes || 12);
+        : undefined;
+    const totalEpisodes = streamProvider === "anizone" && anime?.episodes
+        ? anime.episodes
+        : (typeof streamAvailableEpisodes === "number" && streamAvailableEpisodes > 0
+            ? streamAvailableEpisodes
+            : (anime?.episodes || 12));
     const episodeItems = buildEpisodeList(totalEpisodes, normalizedEpisode);
     const relatedItems = (aiRelated?.length ? aiRelated : anime?.recommendations?.length ? anime.recommendations : anime?.related || []).slice(0, 6);
 

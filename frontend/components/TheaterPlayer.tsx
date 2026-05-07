@@ -62,6 +62,9 @@ export default function TheaterPlayer({
         if (provider === "animepahe" || streamUrl?.includes("owocdn.top") || streamUrl?.includes("kwik.cx")) {
             return "https://kwik.cx/";
         }
+        if (provider === "anizone") {
+            return "https://anizone.to/";
+        }
         return getSiteReferer(embedUrl) || getSiteReferer(streamUrl);
     }, [embedUrl, streamUrl, provider]);
 
