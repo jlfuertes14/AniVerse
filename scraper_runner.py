@@ -27,6 +27,7 @@ from dotenv import load_dotenv
 load_dotenv() # Load .env variables
 import re
 from urllib.parse import quote_plus
+from playwright.async_api import async_playwright
 
 # Ensure Playwright uses a project-local browser cache on Render/CI if available
 _playwright_cache = os.path.join(os.path.dirname(__file__), ".playwright")
@@ -146,7 +147,6 @@ def _title_similarity_score(source_title: str, candidate_title: str) -> float:
 
 async def reanime_search(title: str, target_anilist_id: int = None) -> dict | None:
     """Search Re:ANIME for an anime title and optionally verify AniList ID."""
-    from playwright.async_api import async_playwright
     from bs4 import BeautifulSoup
     import re
 
@@ -299,7 +299,7 @@ async def reanime_scrape_episode(slug: str, episode_number: int) -> dict | None:
     # 1. Try Zyte API (Turbo)
     # We wait for the iframe to have a real src (not just about:blank)
     html = _try_zyte_api(watch_url, actions=[
-        {"action": "waitForSelector", "selector": "iframe#video-player", "timeout": 20},
+        {"action": "waitForSelector", "selector": {"type": "css", "value": "iframe#video-player"}, "timeout": 20},
     ])
     
     if html:
