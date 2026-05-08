@@ -826,6 +826,36 @@ h6 {
   gap: 1.5rem;
 }
 
+.watch-related {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 1.5rem;
+  background: var(--bg-surface);
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--border-subtle);
+  min-height: 400px;
+}
+
+.watch-related-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 3rem 1rem;
+  color: var(--text-muted);
+  text-align: center;
+  font-size: 0.85rem;
+  opacity: 0.6;
+}
+
+.watch-related-empty svg {
+  width: 48px;
+  height: 48px;
+  margin-bottom: 0.5rem;
+}
+
 .watch-header {
   display: flex;
   flex-direction: column;
@@ -846,9 +876,13 @@ h6 {
 
 .watch-playback-container {
   display: grid;
-  grid-template-columns: 200px minmax(0, 1fr) 300px;
-  gap: 1.5rem;
+  grid-template-columns: 220px minmax(0, 1fr) 320px;
+  gap: 2rem;
   align-items: start;
+}
+
+.watch-playback-container.movie-mode {
+  grid-template-columns: minmax(0, 1fr) 320px;
 }
 
 /* Mobile-only sections hidden on desktop */

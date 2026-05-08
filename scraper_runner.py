@@ -23,10 +23,12 @@ import asyncio
 import json
 import sys
 import os
+from dotenv import load_dotenv
+load_dotenv() # Load .env variables
 import re
 from urllib.parse import quote_plus
 
-# Ensure Playwright uses a project-local browser cache on Render
+# Ensure Playwright uses a project-local browser cache on Render/CI if available
 _playwright_cache = os.path.join(os.path.dirname(__file__), ".playwright")
 if os.path.exists(_playwright_cache):
     os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", _playwright_cache)
@@ -40,9 +42,70 @@ if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 
+# ── MongoDB Connectivity (Cache Layer) ─────────────────────────
+import pymongo
+from pymongo import MongoClient
+
+MONGODB_URI = os.environ.get("MONGODB_URI")
+MONGODB_DB = os.environ.get("MONGODB_DB", "aniverse")
+
+def get_db():
+    if not MONGODB_URI:
+        return None
+    try:
+        # Use a short timeout for the cache check
+        client = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=2000)
+        return client[MONGODB_DB]
+    except Exception as e:
+        log(f"[DB] Connection Error: {e}")
+        return None
+
+db = get_db()
+
+
 def log(msg: str):
     """Log to stderr so stdout stays clean for JSON output."""
     print(msg, file=sys.stderr)
+
+
+# ── Zyte API Integration (Turbo Mode) ──────────────────────────
+ZYTE_API_KEY = os.environ.get("ZYTE_API_KEY")
+
+def _try_zyte_api(url, use_browser=True, actions=None):
+    """Try to fetch data via Zyte API with browser rendering."""
+    if not ZYTE_API_KEY:
+        return None
+    
+    import requests
+    try:
+        log(f"[Zyte API] Turbo-fetching: {url}")
+        payload = {
+            "url": url,
+            "browserHtml": use_browser
+        }
+        if actions:
+            payload["actions"] = actions
+            
+        response = requests.post(
+            "https://api.zyte.com/v1/extract",
+            auth=(ZYTE_API_KEY, ""),
+            json=payload,
+            timeout=45
+        )
+        if response.status_code in [429, 402, 401]:
+            log(f"[Zyte API] API Limit/Error ({response.status_code}). Falling back to Local Playwright...")
+            return None
+        
+        if response.status_code >= 400:
+            log(f"[Zyte API] Error {response.status_code}: {response.text}")
+            return None
+            
+        response.raise_for_status()
+        data = response.json()
+        return data.get("browserHtml", "")
+    except Exception as e:
+        log(f"[Zyte API] Exception: {e}. Falling back...")
+        return None
 
 
 def _normalize_title(value: str | None) -> str:
@@ -77,68 +140,6 @@ def _title_similarity_score(source_title: str, candidate_title: str) -> float:
     return overlap / union if union else 0.0
 
 
-async def run_action(action: str, params: dict):
-    """Dispatch to the appropriate scraper function."""
-
-    if action == "animepahe_full":
-        from scraper import scrape_animepahe
-        result = await scrape_animepahe(
-            params["title"],
-            max_episodes=params.get("max_episodes", 0),
-            session_id=params.get("session_id")
-        )
-        return result
-
-    elif action == "animepahe_stream":
-        return await animepahe_get_stream(
-            params["session"],
-            params["episode_session"]
-        )
-
-    elif action == "kwik_stream":
-        return await resolve_kwik_stream(
-            params["url"]
-        )
-
-    elif action == "animepahe_episode":
-        result = await asyncio.to_thread(
-            scrape_animepahe_episode_sync,
-            params["title"],
-            params["episode_number"],
-            params.get("session_id"),
-            params.get("offset", 0)
-        )
-        return result
-
-    elif action == "animepahe_catalog":
-        result = await asyncio.to_thread(
-            scrape_animepahe_catalog_sync,
-            params["title"],
-            params.get("session_id"),
-            params.get("offset", 0)
-        )
-        return result
-
-    elif action == "animepahe_latest":
-        from scraper import scrape_animepahe_latest
-        return await scrape_animepahe_latest(params.get("pages", 3))
-    elif action == "reanime_latest":
-        from scraper import scrape_reanime_latest
-        return await scrape_reanime_latest()
-
-    elif action == "anime_schedule":
-        from scraper import scrape_anime_schedule
-        return await scrape_anime_schedule()
-
-    elif action == "reanime_search":
-        return await reanime_search(params["title"], params.get("anilist_id"))
-
-    elif action == "reanime_scrape_episode":
-        return await reanime_scrape_episode(params["slug"], params["episode_number"])
-
-    else:
-        log(f"Unknown action: {action}")
-        return None
 
 
 # ── Re:ANIME actions ──────────────────────────────────────────
@@ -146,9 +147,62 @@ async def run_action(action: str, params: dict):
 async def reanime_search(title: str, target_anilist_id: int = None) -> dict | None:
     """Search Re:ANIME for an anime title and optionally verify AniList ID."""
     from playwright.async_api import async_playwright
+    from bs4 import BeautifulSoup
+    import re
 
     log(f"[Re:ANIME] Searching for: {title} (Target AniList: {target_anilist_id})")
 
+    # 0. Check Cache (MongoDB)
+    if db is not None:
+        query = {"provider": "reanime"}
+        if target_anilist_id: query["mal_id"] = target_anilist_id
+        else: query["title"] = title
+        
+        cached = db.provider_mappings.find_one(query)
+        if cached and cached.get("slug"):
+            log(f"[Re:ANIME][Cache] Hit: {cached.get('title')} (slug: {cached.get('slug')})")
+            return {"slug": cached["slug"], "anilist_id": cached.get("mal_id")}
+
+    # 1. Try Zyte API (Turbo)
+    # Re:ANIME search is dynamic, but we can try to render it with a simple wait
+    html = _try_zyte_api("https://reanime.to/", actions=[
+        {"action": "waitForSelector", "selector": {"type": "css", "value": "input[placeholder*='Search']"}, "timeout": 5},
+        {"action": "type", "selector": {"type": "css", "value": "input[placeholder*='Search']"}, "text": title},
+        {"action": "click", "selector": {"type": "css", "value": "button:has-text('Search')"}, "onError": "ignore"}, # Click search if button exists
+        {"action": "waitForSelector", "selector": {"type": "css", "value": "a[href*='/anime/']"}, "timeout": 10}
+    ])
+    
+    if html:
+        log(f"[Re:ANIME][Zyte] Parsing search results...")
+        soup = BeautifulSoup(html, 'html.parser')
+        cards = soup.select("a[href*='/anime/']")
+        for card in cards:
+            href = card.get("href")
+            if not href or "/anime/" not in href: continue
+            
+            res_title = card.select_one("h3")
+            res_title = res_title.get_text(strip=True) if res_title else ""
+            img = card.select_one("img")
+            img_src = img.get("src") if img else ""
+            
+            found_anilist_id = None
+            if img_src:
+                id_match = re.search(r'/bx(\d+)-', img_src)
+                if id_match: found_anilist_id = int(id_match.group(1))
+            
+            if target_anilist_id and found_anilist_id == target_anilist_id:
+                slug = href.split("/")[-1]
+                log(f"[Re:ANIME][Zyte] ID Match: {slug}")
+                return {"slug": slug, "anilist_id": found_anilist_id}
+            
+            similarity = _title_similarity_score(title, res_title)
+            if title.lower() in res_title.lower() or similarity >= 0.72:
+                slug = href.split("/")[-1]
+                log(f"[Re:ANIME][Zyte] Title Match: {slug}")
+                return {"slug": slug, "anilist_id": found_anilist_id}
+
+    # 2. Fallback to Local Playwright (Free)
+    log(f"[Re:ANIME][Local] Falling back to local Playwright...")
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(
@@ -224,14 +278,57 @@ async def reanime_search(title: str, target_anilist_id: int = None) -> dict | No
             await browser.close()
     return None
 
-
 async def reanime_scrape_episode(slug: str, episode_number: int) -> dict | None:
-    """Scrape the FlixCloud embed URL from a Re:ANIME watch page."""
-    from playwright.async_api import async_playwright
-
+    """Extract kwik streaming URL for a Re:ANIME episode."""
+    from bs4 import BeautifulSoup
     watch_url = f"https://reanime.to/watch/{slug}?ep={episode_number}"
     log(f"[Re:ANIME] Starting scrape for Ep {episode_number}: {watch_url}")
 
+    # 0. Check Cache (MongoDB)
+    if db is not None:
+        cached = db.streams.find_one({"referer_url": watch_url, "provider": "reanime"})
+        if cached and cached.get("embed_url"):
+            log(f"[Re:ANIME][Cache] Hit for Ep {episode_number}")
+            return {
+                "embed_url": cached["embed_url"],
+                "provider": "reanime",
+                "referer_url": watch_url,
+                "available_episodes": cached.get("available_episodes", episode_number)
+            }
+
+    # 1. Try Zyte API (Turbo)
+    # We wait for the iframe to have a real src (not just about:blank)
+    html = _try_zyte_api(watch_url, actions=[
+        {"action": "waitForSelector", "selector": "iframe#video-player", "timeout": 20},
+    ])
+    
+    if html:
+        soup = BeautifulSoup(html, 'html.parser')
+        iframe = soup.select_one("iframe#video-player, iframe[src*='flixcloud.cc']")
+        embed_url = iframe.get("src") if iframe else None
+        
+        if embed_url and "flixcloud.cc" in embed_url:
+            log(f"[Re:ANIME][Zyte] Found FlixCloud embed: {embed_url}")
+            
+            # Count episodes
+            ep_elements = soup.select("a[data-episode]")
+            available_episodes = 1
+            if ep_elements:
+                try:
+                    ep_nums = [int(el.get("data-episode")) for el in ep_elements if el.get("data-episode").isdigit()]
+                    if ep_nums: available_episodes = max(ep_nums)
+                except: pass
+                
+            return {
+                "embed_url": embed_url,
+                "stream_url": None,
+                "provider": "reanime",
+                "referer_url": watch_url,
+                "available_episodes": available_episodes
+            }
+
+    # 2. Fallback to Local Playwright (Free)
+    log(f"[Re:ANIME][Local] Using local Playwright...")
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(
@@ -649,14 +746,51 @@ def scrape_animepahe_catalog_sync(title: str, session_id: str | None = None, off
 
 
 async def animepahe_get_stream(session: str, episode_session: str) -> dict | None:
-    """Resolve the kwik embed URL using async Playwright."""
+    """Resolve a specific AnimePahe episode to its stream metadata."""
     from playwright.async_api import async_playwright
+    from bs4 import BeautifulSoup
+    import re
 
-    play_url = f"{ANIMEPAHE_BASE}/play/{session}/{episode_session}"
+    play_url = f"https://animepahe.pw/play/{session}/{episode_session}"
+    log(f"[AnimePahe] Resolving stream: {play_url}")
+
+    # 1. Try Zyte API (Turbo)
+    html = _try_zyte_api(play_url, actions=[
+        {"action": "waitForSelector", "selector": {"type": "css", "value": "#resolutionMenu button"}, "timeout": 15}
+    ])
+    
+    if html:
+        soup = BeautifulSoup(html, 'html.parser')
+        links = []
+        for btn in soup.select('#resolutionMenu button'):
+            quality = btn.get_text(strip=True)
+            stream_url = btn.get('data-src') or btn.get('data-url')
+            if stream_url: links.append({"quality": quality, "url": stream_url})
+        
+        if links:
+            log(f"[AnimePahe][Zyte] Found {len(links)} streams")
+            return {
+                "stream_url": links[0]["url"],
+                "all_qualities": [l["url"] for l in links],
+                "provider": "animepahe"
+            }
+        
+        # Fallback regex for Kwik links in HTML
+        kwik_matches = re.findall(r'https://kwik\.cx/e/[a-zA-Z0-9]+', html)
+        if kwik_matches:
+            log(f"[AnimePahe][Zyte] Found Kwik links via Regex: {len(kwik_matches)}")
+            return {
+                "stream_url": kwik_matches[0],
+                "all_qualities": list(set(kwik_matches)),
+                "provider": "animepahe"
+            }
+
+    # 2. Fallback to Local Playwright (Free)
+    log(f"[AnimePahe][Local] Using local Playwright...")
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/131.0.0.0 Safari/537.36"
         )
         page = await context.new_page()
 
@@ -687,7 +821,27 @@ async def animepahe_get_stream(session: str, episode_session: str) -> dict | Non
 async def resolve_kwik_stream(url: str) -> dict | None:
     """Resolve a kwik embed page to a direct playable media URL."""
     from playwright.async_api import async_playwright
+    import re
 
+    # 0. Check Cache (MongoDB)
+    if db is not None:
+        cached = db.streams.find_one({"url": url})
+        if cached and cached.get("stream_url"):
+            log(f"[Kwik][Cache] Hit for: {url}")
+            return {"stream_url": cached["stream_url"], "provider": "kwik"}
+
+    # 1. Try Zyte API (Turbo)
+    html = _try_zyte_api(url)
+    if html:
+        # Kwik stores the URL in a script tag, often packed
+        match = re.search(r'https?://[^\s\'"]+\.(?:m3u8|mp4)[^\s\'"]*', html)
+        if match:
+            stream_url = match.group(0)
+            log(f"[Kwik][Zyte] Resolved stream: {stream_url}")
+            return {"stream_url": stream_url, "provider": "kwik"}
+
+    # 2. Fallback to Local Playwright (Free)
+    log(f"[Kwik][Local] Using local Playwright...")
     request_candidates: list[str] = []
     response_candidates: list[str] = []
 
@@ -741,8 +895,75 @@ async def resolve_kwik_stream(url: str) -> dict | None:
 
 # ── Entry point ──────────────────────────────────────────────
 
+async def run_action(action: str, params: dict):
+    """Dispatch to the appropriate scraper function."""
+
+    if action == "animepahe_full":
+        from scraper import scrape_animepahe
+        result = await scrape_animepahe(
+            params["title"],
+            max_episodes=params.get("max_episodes", 0),
+            session_id=params.get("session_id")
+        )
+        return result
+
+    elif action == "animepahe_stream":
+        return await animepahe_get_stream(
+            params["session"],
+            params["episode_session"]
+        )
+
+    elif action == "kwik_stream":
+        return await resolve_kwik_stream(
+            params["url"]
+        )
+
+    elif action == "animepahe_episode":
+        from scraper import scrape_animepahe
+        result = await scrape_animepahe(
+            params["title"],
+            session_id=params.get("session_id"),
+            target_episode=int(params["episode_number"])
+        )
+        # Find the specific episode in the catalog result
+        target_ep = str(params["episode_number"])
+        found_ep = next((ep for ep in result.get("episodes", []) if str(ep.get("ep_number")) == target_ep), None)
+        return {"episode": found_ep, "session": result.get("session")} if found_ep else result
+
+    elif action == "animepahe_catalog":
+        from scraper import scrape_animepahe
+        result = await scrape_animepahe(
+            params["title"],
+            session_id=params.get("session_id")
+        )
+        return result
+
+    elif action == "animepahe_latest":
+        from scraper import scrape_animepahe_latest
+        return await scrape_animepahe_latest(params.get("pages", 3))
+    elif action == "reanime_latest":
+        from scraper import scrape_reanime_latest
+        return await scrape_reanime_latest()
+
+    elif action == "anime_schedule":
+        from scraper import scrape_anime_schedule
+        return await scrape_anime_schedule()
+
+    elif action == "reanime_search":
+        return await reanime_search(params["title"], params.get("anilist_id"))
+
+    elif action == "reanime_scrape_episode":
+        return await reanime_scrape_episode(params["slug"], params["episode_number"])
+
+    else:
+        log(f"Unknown action: {action}")
+        return None
+
 if __name__ == "__main__":
-    log("DEBUG: Scraper starting")
+    import sys
+    import json
+    import asyncio
+
     if len(sys.argv) < 3:
         print(json.dumps({"error": "Usage: python scraper_runner.py <action> <json_params>"}))
         sys.exit(1)

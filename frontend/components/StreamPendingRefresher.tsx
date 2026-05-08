@@ -39,7 +39,7 @@ function formatAiringCountdown(nextAiringAt?: string | null, nextEpisode?: numbe
 export default function StreamPendingRefresher({
     pollIntervalSeconds = 25,
     estimateSeconds = 90,
-    fallbackAfterSeconds = 45,
+    fallbackAfterSeconds = 90,
     title = "Preparing your stream",
     thumbnailUrl = "/placeholder.png",
     episodeLabel = "Episode",

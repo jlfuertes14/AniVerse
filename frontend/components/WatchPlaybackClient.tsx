@@ -16,6 +16,7 @@ interface WatchPlaybackClientProps {
     episodeItems: number[];
     streamData: StreamResponse;
     relatedItems: (Anime | AnimeDetail)[];
+    isMovie?: boolean;
 }
 
 export default function WatchPlaybackClient({
@@ -27,6 +28,7 @@ export default function WatchPlaybackClient({
     episodeItems,
     streamData,
     relatedItems,
+    isMovie = false,
 }: WatchPlaybackClientProps) {
     const router = useRouter();
     const searchParams = useSearchParams();
@@ -79,22 +81,23 @@ export default function WatchPlaybackClient({
     }, [currentEpisode, malId, router, searchParams, showLoading]);
 
     return (
-        <div className="watch-playback-container" suppressHydrationWarning={true}>
-            <aside className="watch-sidebar">
-                <div className="watch-side-panel">
-                    <div className="watch-side-top">
-                        <span className="watch-chip active">Episodes</span>
-                        {episodeChunks.map((chunk, idx) => (
-                            <button
-                                key={idx}
-                                className={`watch-chip-btn ${idx === activeRangeIndex ? "active" : ""}`}
-                                onClick={() => setRangeOverride(idx)}
-                            >
-                                {chunk.label}
-                            </button>
-                        ))}
-                    </div>
-                    <div className="watch-episode-search">
+        <div className={`watch-playback-container ${isMovie ? "movie-mode" : ""}`} suppressHydrationWarning={true}>
+            {!isMovie && (
+                <aside className="watch-sidebar">
+                    <div className="watch-side-panel">
+                        <div className="watch-side-top">
+                            <span className="watch-chip active">Episodes</span>
+                            {episodeChunks.map((chunk, idx) => (
+                                <button
+                                    key={idx}
+                                    className={`watch-chip-btn ${idx === activeRangeIndex ? "active" : ""}`}
+                                    onClick={() => setRangeOverride(idx)}
+                                >
+                                    {chunk.label}
+                                </button>
+                            ))}
+                        </div>
+                        <div className="watch-episode-search">
                         <input
                             type="text"
                             placeholder="Find ep"
@@ -122,7 +125,8 @@ export default function WatchPlaybackClient({
                         )}
                     </div>
                 </div>
-            </aside>
+                </aside>
+            )}
 
             <section className="watch-main">
                 <TheaterPlayer
@@ -190,26 +194,28 @@ export default function WatchPlaybackClient({
                 )}
 
                 {/* New Mobile Episode Guide */}
-                <section className="watch-ep-guide">
-                    <h3>Episode Guide</h3>
-                    <div className="watch-ep-scroll">
-                        {episodeItems.map((epNum) => (
-                            <LoadingLink
-                                key={epNum}
-                                href={`/watch/${malId}/${epNum}`}
-                                className={`watch-ep-card ${epNum === currentEpisode ? "active" : ""}`}
-                                loadingMessage={`Loading episode ${epNum}...`}
-                            >
-                                <div className={`watch-ep-thumb ${epNum === currentEpisode ? "active" : ""}`}>
-                                    <img src={thumbnailUrl} alt={`Episode ${epNum}`} loading="lazy" />
-                                    <div className="play-icon">▶</div>
-                                </div>
-                                <div className="watch-ep-label">Episode {epNum}</div>
-                                <div className="watch-ep-indicator"></div>
-                            </LoadingLink>
-                        ))}
-                    </div>
-                </section>
+                {!isMovie && (episodeItems.length > 1) && (
+                    <section className="watch-ep-guide">
+                        <h3>Episode Guide</h3>
+                        <div className="watch-ep-scroll">
+                            {episodeItems.map((epNum) => (
+                                <LoadingLink
+                                    key={epNum}
+                                    href={`/watch/${malId}/${epNum}`}
+                                    className={`watch-ep-card ${epNum === currentEpisode ? "active" : ""}`}
+                                    loadingMessage={`Loading episode ${epNum}...`}
+                                >
+                                    <div className={`watch-ep-thumb ${epNum === currentEpisode ? "active" : ""}`}>
+                                        <img src={thumbnailUrl} alt={`Episode ${epNum}`} loading="lazy" />
+                                        <div className="play-icon">▶</div>
+                                    </div>
+                                    <div className="watch-ep-label">Episode {epNum}</div>
+                                    <div className="watch-ep-indicator"></div>
+                                </LoadingLink>
+                            ))}
+                        </div>
+                    </section>
+                )}
 
                 {/* New Mobile Recommendations */}
                 <section className="watch-related-mobile">

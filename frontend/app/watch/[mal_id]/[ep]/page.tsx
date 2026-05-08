@@ -121,15 +121,15 @@ export default async function WatchPage({
     // 2. We always show at least the episode the user is currently watching.
     // 3. We fallback to 12 as a sensible minimum for UI layout if no data exists.
     let totalEpisodes: number;
-
-    if (isAiring) {
-        // For airing shows, limit to what's actually available to watch, 
-        // or what Jikan says has aired so far (if provider is empty).
+    const isMovie = anime?.type === "Movie";
+    if (isMovie && jikanEpisodes === 1) {
+        totalEpisodes = 1;
+    } else if (isAiring) {
         totalEpisodes = Math.max(providerEpisodes, normalizedEpisode);
         if (totalEpisodes === 0) totalEpisodes = Math.max(jikanEpisodes, 12);
     } else {
-        // For finished shows, the Jikan total is the source of truth.
-        totalEpisodes = Math.max(jikanEpisodes, providerEpisodes, normalizedEpisode, 12);
+        const baseTotal = Math.max(jikanEpisodes, providerEpisodes, normalizedEpisode);
+        totalEpisodes = baseTotal >= 12 ? baseTotal : 12;
     }
     
     const episodeItems = buildEpisodeList(totalEpisodes, normalizedEpisode);
@@ -165,6 +165,7 @@ export default async function WatchPage({
     }
 
     const resolvedStreamData: StreamResponse = streamData;
+    const isSingleEpisode = totalEpisodes === 1;
 
     return (
         <>
@@ -180,6 +181,7 @@ export default async function WatchPage({
                     episodeItems={episodeItems}
                     streamData={resolvedStreamData}
                     relatedItems={relatedItems}
+                    isMovie={isSingleEpisode}
                 />
 
                 {anime && (

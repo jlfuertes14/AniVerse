@@ -196,8 +196,12 @@ async def refresh_airing_schedule(force: bool = False):
         )
         stdout, stderr = await process.communicate()
 
+        if stderr.strip():
+            for line in stderr.decode().strip().split('\n'):
+                print(f"[Scraper] {line}")
+
         if process.returncode != 0:
-            print(f"[Schedule] Scraper failed: {stderr.decode()}")
+            print(f"[Schedule] Scraper failed (exit {process.returncode})")
             return
 
         lines = stdout.decode().strip().split("\n")

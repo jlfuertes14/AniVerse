@@ -26,6 +26,8 @@ _refresh_locks: dict[int, asyncio.Lock] = {}
 _active_refreshes: set[int] = set()
 _latest_releases_lock = asyncio.Lock()
 MAPPING_LOOKUP_DELAY_SECONDS = 0.45
+_stream_locks: dict[str, asyncio.Lock] = {}
+_embed_locks: dict[str, asyncio.Lock] = {}
 
 
 def _utc_now_iso() -> str:
@@ -910,33 +912,84 @@ async def get_animepahe_stream(session: str, episode_session: str) -> Optional[s
     """
     Resolve a kwik.cx embed URL for a specific episode.
     Called on-demand when a user clicks play.
+    Deduplicates requests using an internal lock and DB check.
     """
-    print(f"[AnimePahe Service] Resolving stream for {session}/{episode_session}")
+    lock_key = f"{session}-{episode_session}"
+    if lock_key not in _stream_locks:
+        _stream_locks[lock_key] = asyncio.Lock()
 
-    try:
-        result = await _run_scraper_subprocess("animepahe_stream", {
-            "session": session,
-            "episode_session": episode_session
-        })
+    async with _stream_locks[lock_key]:
+        # 1. Check DB first in case another process just resolved it
+        db = get_db()
+        cached = await db["streams"].find_one(
+            {"provider_id": session, "episode_id": episode_session, "source": "animepahe"},
+            {"stream_url": 1}
+        )
+        if cached and cached.get("stream_url"):
+            print(f"[AnimePahe Service] Reusing cached stream for {session}/{episode_session}")
+            return cached["stream_url"]
 
-        if result and result.get("stream_url"):
-            return result["stream_url"]
-    except Exception as e:
-        print(f"[AnimePahe Service] Stream resolve error: {e}")
-    return None
+        print(f"[AnimePahe Service] Resolving stream for {session}/{episode_session}")
+        try:
+            result = await _run_scraper_subprocess("animepahe_stream", {
+                "session": session,
+                "episode_session": episode_session
+            })
+
+            if result and result.get("stream_url"):
+                stream_url = result["stream_url"]
+                # Save it to DB so future calls are instant
+                await db["streams"].update_one(
+                    {"provider_id": session, "episode_id": episode_session, "source": "animepahe"},
+                    {"$set": {
+                        "stream_url": stream_url,
+                        "updated_at": "resolved"
+                    }}
+                )
+                return stream_url
+        except Exception as e:
+            print(f"[AnimePahe Service] Stream resolve error: {e}")
+        return None
 
 
 async def resolve_animepahe_embed_stream(embed_url: str) -> Optional[str]:
-    """Resolve a kwik embed URL to a direct stream URL."""
-    try:
-        result = await _run_scraper_subprocess("kwik_stream", {
-            "url": embed_url,
-        })
-        if result and result.get("stream_url"):
-            return result["stream_url"]
-    except Exception as e:
-        print(f"[AnimePahe Service] Embed resolve error: {e}")
-    return None
+    """
+    Resolve a kwik embed URL to a direct stream URL.
+    Deduplicates requests using an internal lock and DB check.
+    """
+    if embed_url not in _embed_locks:
+        _embed_locks[embed_url] = asyncio.Lock()
+
+    async with _embed_locks[embed_url]:
+        # 1. Check DB first
+        db = get_db()
+        cached = await db["streams"].find_one({"embed_url": embed_url}, {"stream_url": 1})
+        if cached and cached.get("stream_url"):
+            # Check if it's a direct URL (not just the embed link mirrored)
+            url = cached["stream_url"]
+            if url and "kwik" not in url.lower() and (url.endswith(".m3u8") or url.endswith(".mp4")):
+                print(f"[AnimePahe Service] Reusing cached direct stream for {embed_url}")
+                return url
+
+        print(f"[AnimePahe Service] Resolving direct stream for {embed_url}")
+        try:
+            result = await _run_scraper_subprocess("kwik_stream", {
+                "url": embed_url,
+            })
+            if result and result.get("stream_url"):
+                direct_url = result["stream_url"]
+                # Save it to DB
+                await db["streams"].update_many(
+                    {"embed_url": embed_url},
+                    {"$set": {
+                        "stream_url": direct_url,
+                        "updated_at": "resolved"
+                    }}
+                )
+                return direct_url
+        except Exception as e:
+            print(f"[AnimePahe Service] Embed resolve error: {e}")
+        return None
 
 
 async def _run_scraper_subprocess(action: str, params: dict) -> dict | None:
@@ -983,6 +1036,11 @@ def _sync_run_subprocess(cmd: list) -> dict | None:
             return None
 
         # Find the last JSON line in the output
+        if proc.stderr.strip():
+            # Print scraper logs (stderr) to console
+            for line in proc.stderr.strip().split('\n'):
+                print(f"[Scraper] {line}")
+
         for line in reversed(stdout.split('\n')):
             line = line.strip()
             if line.startswith('{') or line.startswith('['):

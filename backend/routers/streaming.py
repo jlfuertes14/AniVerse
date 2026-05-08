@@ -214,9 +214,29 @@ async def get_episode_stream(
         
         search_title = anime.title_english or anime.title
         # Skip AnimePahe checks if user explicitly preferred reanime
+        # If user prefers reanime, check if it's in progress or if we should skip AnimePahe
         if prefer == "reanime":
-            print(f"[Streaming] User prefers reanime. Skipping AnimePahe discovery flow.")
+            print(f"[Streaming] User prefers reanime. Checking if AnimePahe is still working...")
             mapping = animepahe_mapping
+            # If AnimePahe is currently refreshing, let's wait for it instead of 
+            # immediately triggering a backup discovery, as it might finish soon.
+            if is_animepahe_refresh_in_progress(mal_id):
+                print(f"[Streaming] AnimePahe refresh in progress. Waiting for it before trying Re:ANIME.")
+                available_episodes = int(mapping.get("latest_episode", 0)) if mapping else 0
+                pending_catalog_status = _build_catalog_status(mapping, "animepahe")
+                return JSONResponse(
+                    status_code=202,
+                    content={
+                        "detail": "AnimePahe stream is being fetched. Please refresh in a few seconds.",
+                        "mal_id": mal_id,
+                        "ep_number": ep_number,
+                        "status": "pending",
+                        "provider": "animepahe",
+                        "available_episodes": available_episodes,
+                        "catalog_status": pending_catalog_status.model_dump() if pending_catalog_status else None,
+                    }
+                )
+            
             available_episodes = int(mapping.get("latest_episode", 0)) if mapping else 0
             should_refresh = False
         else:

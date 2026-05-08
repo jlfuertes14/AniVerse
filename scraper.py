@@ -3,6 +3,8 @@ import json
 import sys
 import re
 import os
+from dotenv import load_dotenv
+load_dotenv() # Load .env variables
 
 # Ensure Playwright uses a project-local browser cache on Render
 _playwright_cache = os.path.join(os.path.dirname(__file__), ".playwright")
@@ -15,15 +17,78 @@ from playwright.async_api import async_playwright
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
+# ── MongoDB Connectivity (Cache Layer) ─────────────────────────
+import pymongo
+from pymongo import MongoClient
+
+MONGODB_URI = os.environ.get("MONGODB_URI")
+MONGODB_DB = os.environ.get("MONGODB_DB", "aniverse")
+
+def get_db():
+    if not MONGODB_URI:
+        return None
+    try:
+        client = MongoClient(MONGODB_URI)
+        return client[MONGODB_DB]
+    except Exception as e:
+        _log(f"[DB] Connection Error: {e}")
+        return None
+
+db = get_db()
+
 # When called as a subprocess, redirect all prints to stderr
 # so stdout stays clean for JSON output
 _is_subprocess = os.environ.get("SCRAPER_SUBPROCESS") == "1"
 
-def _log(*args, **kwargs):
-    """Print to stderr when running as subprocess, stdout otherwise."""
+def _log(msg: str):
     if _is_subprocess:
-        kwargs["file"] = sys.stderr
-    print(*args, **kwargs)
+        print(msg, file=sys.stderr)
+    else:
+        print(msg)
+
+# ── Zyte API Integration (Turbo Mode) ──────────────────────────
+ZYTE_API_KEY = os.environ.get("ZYTE_API_KEY")
+
+def _try_zyte_api(url, use_browser=True):
+    """Try to fetch data via Zyte API. Returns JSON data if it's an API call, or HTML if not."""
+    if not ZYTE_API_KEY:
+        return None
+    
+    import requests
+    try:
+        _log(f"[Zyte API] Turbo-fetching: {url}")
+        payload = {
+            "url": url,
+            "browserHtml": use_browser
+        }
+        response = requests.post(
+            "https://api.zyte.com/v1/extract",
+            auth=(ZYTE_API_KEY, ""),
+            json=payload,
+            timeout=30
+        )
+        # If we hit 429 (Too many requests) or 402 (Payment Required), trigger fallback
+        if response.status_code in [429, 402, 401]:
+            _log(f"[Zyte API] API Limit/Error ({response.status_code}). Falling back to Local Playwright...")
+            return None
+            
+        response.raise_for_status()
+        data = response.json()
+        
+        # If it's a browserHtml request, we might need to extract JSON from the HTML wrapper
+        if use_browser:
+            html = data.get("browserHtml", "")
+            if "{" in html and "}" in html:
+                import json
+                import re
+                match = re.search(r'\{.*\}', html, re.DOTALL)
+                if match:
+                    return json.loads(match.group())
+            return html
+        return data
+    except Exception as e:
+        _log(f"[Zyte API] Error: {e}. Falling back...")
+        return None
 
 
 
@@ -88,10 +153,35 @@ def _select_animepahe_episode(episodes: list, requested_episode: int):
 
 async def animepahe_search(title: str) -> dict | None:
     """
-    Search AnimePahe for an anime title using Playwright to bypass DDoS-Guard.
-    Returns dict with 'session' and 'title' keys, or None.
+    Search AnimePahe for an anime title.
+    Hybrid: Tries Zyte API first, falls back to Local Playwright.
     """
-    _log(f"[AnimePahe] Searching for: {title}")
+    # 0. Check Cache (MongoDB)
+    if db is not None:
+        cached = db.provider_mappings.find_one({"title": title, "provider": "animepahe"})
+        if cached and cached.get("session"):
+            _log(f"[AnimePahe][Cache] Hit: {cached.get('title')} (session: {cached.get('session')})")
+            return {"session": cached["session"], "title": cached.get("title", title)}
+
+    # 1. Try Zyte API (Turbo)
+    api_url = f"{ANIMEPAHE_BASE}/api?m=search&q={title}"
+    zyte_data = _try_zyte_api(api_url, use_browser=True)
+    
+    if zyte_data and isinstance(zyte_data, dict) and zyte_data.get("data"):
+        results = zyte_data["data"]
+        best_match = results[0]
+        search_title_lower = title.lower()
+        for res in results:
+            res_title = res.get("title", "").lower()
+            if res_title == search_title_lower or search_title_lower in res_title:
+                best_match = res
+                if res_title == search_title_lower: break
+        
+        _log(f"[AnimePahe][Zyte] Match found: {best_match.get('title')}")
+        return {"session": best_match["session"], "title": best_match.get("title", title)}
+
+    # 2. Fallback to Local Playwright (Free)
+    _log(f"[AnimePahe][Local] Using local Playwright...")
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(
@@ -172,14 +262,45 @@ async def _animepahe_search_with_page(page, title: str) -> dict | None:
     return None
 
 
-async def animepahe_get_episodes(session: str, max_pages: int = 100) -> list:
+async def animepahe_get_episodes(session: str, max_pages: int = 100, target_episode: int = None) -> list:
     """
-    Fetch episode list from AnimePahe using the browser-based API.
-    Returns list of dicts with 'episode', 'session', 'snapshot' keys.
+    Fetch episode list from AnimePahe.
+    Hybrid: Tries Zyte API first, falls back to Local Playwright.
     """
-    _log(f"[AnimePahe] Fetching episodes for session: {session}")
-    all_episodes = []
+    _log(f"[AnimePahe] Fetching episodes for session: {session} (Target Ep: {target_episode})")
+    
+    # 1. Try Zyte API (Turbo)
+    # If we have a target episode, calculate the likely page (30 eps per page)
+    target_page = 1
+    if target_episode and target_episode > 30:
+        target_page = ((target_episode - 1) // 30) + 1
+        _log(f"[AnimePahe][Zyte] Calculating target page for Ep {target_episode} -> Page {target_page}")
 
+    api_url = f"{ANIMEPAHE_BASE}/api?m=release&id={session}&sort=episode_asc&page={target_page}"
+    zyte_data = _try_zyte_api(api_url, use_browser=True)
+    
+    if zyte_data and isinstance(zyte_data, dict) and zyte_data.get("data"):
+        _log(f"[AnimePahe][Zyte] Successfully fetched episode data (Page {target_page})")
+        all_episodes = zyte_data.get("data", [])
+        
+        # If we didn't find our target episode on this page (and it's not the first page),
+        # or if it's a short series and we want the first few pages anyway:
+        if target_page == 1:
+            last_page = zyte_data.get("last_page", 1)
+            if last_page > 1:
+                max_zyte_pages = min(last_page, 3)
+                for pg in range(2, max_zyte_pages + 1):
+                    pg_url = f"{ANIMEPAHE_BASE}/api?m=release&id={session}&sort=episode_asc&page={pg}"
+                    pg_data = _try_zyte_api(pg_url, use_browser=True)
+                    if pg_data and isinstance(pg_data, dict) and pg_data.get("data"):
+                        all_episodes.extend(pg_data["data"])
+                        _log(f"[AnimePahe][Zyte] Fetched additional page {pg}")
+        
+        return all_episodes
+
+    # 2. Fallback to Local Playwright (Free)
+    _log(f"[AnimePahe][Local] Using local Playwright...")
+    all_episodes = []
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(
@@ -256,6 +377,20 @@ async def animepahe_get_stream(session: str, episode_session: str) -> dict | Non
     play_url = f"{ANIMEPAHE_BASE}/play/{session}/{episode_session}"
     _log(f"[AnimePahe] Resolving stream: {play_url}")
 
+    # 1. Try Zyte API (Turbo)
+    html = _try_zyte_api(play_url, use_browser=True)
+    if html:
+        kwik_matches = re.findall(r'https://kwik\.[a-z]+/e/[a-zA-Z0-9]+', html)
+        if kwik_matches:
+            _log(f"[AnimePahe][Zyte] Successfully resolved stream")
+            return {
+                "stream_url": kwik_matches[0],
+                "all_qualities": list(set(kwik_matches)),
+                "provider": "animepahe"
+            }
+
+    # 2. Fallback to Local Playwright (Free)
+    _log(f"[AnimePahe][Local] Using local Playwright...")
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(
@@ -398,7 +533,7 @@ async def scrape_animepahe_episode(title: str, episode_number: int, session_id: 
     return result
 
 
-async def scrape_animepahe(title: str, max_episodes: int = 0, session_id: str = None):
+async def scrape_animepahe(title: str, max_episodes: int = 0, session_id: str = None, target_episode: int = None):
     """
     Full AnimePahe pipeline: search (if no session_id) → episodes → streams.
     Returns structured data ready for DB insertion.
@@ -407,6 +542,7 @@ async def scrape_animepahe(title: str, max_episodes: int = 0, session_id: str = 
         title: Anime title to search for
         max_episodes: Max episodes to resolve streams for (0 = all, just store metadata)
         session_id: Optional session ID to skip search
+        target_episode: Optional specific episode to ensure is fetched
     """
     result = {
         "title": title,
@@ -426,7 +562,7 @@ async def scrape_animepahe(title: str, max_episodes: int = 0, session_id: str = 
         session = session_id
 
     # 2. Get episode list
-    episodes = await animepahe_get_episodes(session)
+    episodes = await animepahe_get_episodes(session, target_episode=target_episode)
     if not episodes:
         return result
 
@@ -457,11 +593,24 @@ async def scrape_animepahe(title: str, max_episodes: int = 0, session_id: str = 
 
 
 async def scrape_animepahe_latest(pages: int = 3) -> list:
-    """Scrapes the latest releases from the AnimePahe homepage (multi-page)."""
-    _log(f"[AnimePahe] Scraping latest releases (up to {pages} pages)")
-    latest_releases = []
-    seen_sessions = set()
+    """
+    Fetch the latest releases from AnimePahe.
+    Hybrid: Tries Zyte API first, falls back to Local Playwright.
+    """
+    _log(f"[AnimePahe] Fetching latest releases ({pages} pages)")
+    
+    # 1. Try Zyte API (Turbo)
+    # We'll just fetch the first page via Zyte to see if it works
+    api_url = f"{ANIMEPAHE_BASE}/api?m=airing&page=1"
+    zyte_data = _try_zyte_api(api_url, use_browser=True)
+    
+    if zyte_data and isinstance(zyte_data, dict) and zyte_data.get("data"):
+        _log(f"[AnimePahe][Zyte] Successfully fetched latest releases")
+        return zyte_data.get("data", [])
 
+    # 2. Fallback to Local Playwright (Free)
+    _log(f"[AnimePahe][Local] Using local Playwright...")
+    all_releases = []
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(
@@ -534,10 +683,36 @@ async def scrape_animepahe_latest(pages: int = 3) -> list:
 
 
 async def scrape_reanime_latest() -> list:
-    """Scrapes the latest releases from the Re:ANIME homepage."""
-    _log("[Re:ANIME] Scraping latest releases")
-    latest_releases = []
+    """
+    Fetch latest releases from Re:ANIME.
+    Hybrid: Tries Zyte API first, falls back to Local Playwright.
+    """
+    _log("[Re:ANIME] Fetching latest releases")
     
+    # 1. Try Zyte API (Turbo)
+    # Re:ANIME usually has a JSON endpoint for latest releases if we look close, 
+    # but for now we'll use browserHtml on the homepage.
+    html = _try_zyte_api("https://reanime.to/")
+    if html:
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html, 'html.parser')
+        # Simplified parsing for the hybrid logic
+        releases = []
+        # Look for cards on the homepage
+        cards = soup.select("a[href*='/watch/']")
+        for card in cards:
+            title = card.select_one("h3")
+            if title:
+                releases.append({
+                    "title": title.get_text(strip=True),
+                    "url": card.get("href")
+                })
+        if releases:
+            _log(f"[Re:ANIME][Zyte] Found {len(releases)} latest releases")
+            return releases
+
+    # 2. Fallback to Local Playwright (Free)
+    _log("[Re:ANIME][Local] Using local Playwright...")
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(
@@ -710,12 +885,41 @@ if __name__ == "__main__":
 
 async def scrape_anime_schedule():
     """Scrapes the weekly airing schedule from animeschedule.net."""
-    _log("[Schedule] Starting scraper for animeschedule.net")
+    _log("[Schedule] Starting hybrid scraper for animeschedule.net")
+    
+    # 1. Try Zyte API (Turbo)
+    html = _try_zyte_api("https://animeschedule.net/")
+    if html:
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html, 'html.parser')
+        schedule_data = {"monday":[], "tuesday":[], "wednesday":[], "thursday":[], "friday":[], "saturday":[], "sunday":[]}
+        
+        # Simple parsing for the hybrid logic
+        days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+        columns = soup.select(".timetable-column")
+        for i, col in enumerate(columns):
+            if i >= len(days): break
+            day = days[i]
+            shows = col.select(".timetable-column-show")
+            for show in shows:
+                title = show.select_one(".show-title-bar, h3")
+                time_el = show.select_one(".show-air-time, time")
+                if title:
+                    schedule_data[day].append({
+                        "title": title.get_text(strip=True),
+                        "time": time_el.get_text(strip=True) if time_el else "??:??"
+                    })
+        
+        if any(schedule_data.values()):
+            _log(f"[Schedule][Zyte] Successfully parsed schedule")
+            return schedule_data
+
+    # 2. Fallback to Local Playwright (Free)
+    _log("[Schedule][Local] Using local Playwright...")
     schedule_data = {
         "monday": [], "tuesday": [], "wednesday": [],
         "thursday": [], "friday": [], "saturday": [], "sunday": []
     }
-
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(
@@ -828,3 +1032,27 @@ async def scrape_anime_schedule():
             await browser.close()
 
     return schedule_data
+
+# Re-implementing a simple search CLI for manual testing
+async def main():
+    import sys
+    import json
+    if len(sys.argv) < 2:
+        _log("Usage: python scraper.py <animepahe|latest|reanime_latest> [params]")
+        return
+
+    action = sys.argv[1]
+    if action == "animepahe":
+        title = sys.argv[2] if len(sys.argv) > 2 else "Bleach"
+        res = await animepahe_search(title)
+        print(json.dumps(res))
+    elif action == "latest":
+        res = await scrape_animepahe_latest()
+        print(json.dumps(res))
+    elif action == "reanime_latest":
+        res = await scrape_reanime_latest()
+        print(json.dumps(res))
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())
