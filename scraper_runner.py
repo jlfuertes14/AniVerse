@@ -103,7 +103,11 @@ def _try_zyte_api(url, use_browser=True, actions=None):
             return None
             
         response.raise_for_status()
-        data = response.json()
+        try:
+            data = response.json()
+        except (json.JSONDecodeError, ValueError) as je:
+            log(f"[Zyte API] Error: {je}. Falling back...")
+            return None
         return data.get("browserHtml", "")
     except Exception as e:
         log(f"[Zyte API] Exception: {e}. Falling back...")
@@ -300,7 +304,7 @@ async def reanime_scrape_episode(slug: str, episode_number: int) -> dict | None:
     # 1. Try Zyte API (Turbo)
     # We wait for the iframe to have a real src (not just about:blank)
     html = _try_zyte_api(watch_url, actions=[
-        {"action": "waitForSelector", "selector": {"type": "css", "value": "iframe#video-player"}, "timeout": 20},
+        {"action": "waitForSelector", "selector": {"type": "css", "value": "iframe#video-player"}, "timeout": 15},
     ])
     
     if html:
