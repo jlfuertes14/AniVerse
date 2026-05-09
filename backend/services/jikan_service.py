@@ -82,10 +82,22 @@ async def _get(endpoint: str, params: dict = None) -> dict:
                     response.raise_for_status()
                     await asyncio.sleep(0.35)  # Respect rate limit
                     return response.json()
-                except (httpx.HTTPStatusError, httpx.ConnectError, httpx.ReadTimeout) as e:
+                except httpx.HTTPStatusError as e:
+                    # 404 = MAL ID doesn't exist. No point retrying.
+                    if e.response.status_code == 404:
+                        print(f"[Jikan] 404 Not Found: {endpoint} — skipping retries")
+                        raise
                     last_error = e
                     if attempt < MAX_RETRIES - 1:
-                        wait = _retry_delay_seconds(getattr(e, "response", None), attempt)
+                        wait = _retry_delay_seconds(e.response, attempt)
+                        print(f"[Jikan] Request failed (attempt {attempt + 1}/{MAX_RETRIES}): {e}. Retrying in {wait}s...")
+                        await asyncio.sleep(wait)
+                    else:
+                        print(f"[Jikan] All {MAX_RETRIES} attempts failed: {e}")
+                except (httpx.ConnectError, httpx.ReadTimeout) as e:
+                    last_error = e
+                    if attempt < MAX_RETRIES - 1:
+                        wait = _retry_delay_seconds(None, attempt)
                         print(f"[Jikan] Request failed (attempt {attempt + 1}/{MAX_RETRIES}): {e}. Retrying in {wait}s...")
                         await asyncio.sleep(wait)
                     else:

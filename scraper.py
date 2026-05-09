@@ -73,7 +73,11 @@ def _try_zyte_api(url, use_browser=True):
             return None
             
         response.raise_for_status()
-        data = response.json()
+        try:
+            data = response.json()
+        except (ValueError, Exception) as je:
+            _log(f"[Zyte API] Error: {je}. Falling back...")
+            return None
         
         # If it's a browserHtml request, we might need to extract JSON from the HTML wrapper
         if use_browser:
@@ -83,7 +87,10 @@ def _try_zyte_api(url, use_browser=True):
                 import re
                 match = re.search(r'\{.*\}', html, re.DOTALL)
                 if match:
-                    return json.loads(match.group())
+                    try:
+                        return json.loads(match.group())
+                    except (ValueError, Exception):
+                        return html
             return html
         return data
     except Exception as e:
