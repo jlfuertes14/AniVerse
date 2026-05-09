@@ -42,9 +42,11 @@ def _build_proxy_url(request: Request, target_url: str, referer: str) -> str:
 
 
 def _rewrite_playlist(content: str, playlist_url: str, referer: str, request: Request) -> str:
+    child_referer = playlist_url or referer
+
     def rewrite_uri(raw: str) -> str:
         absolute = _to_absolute_url(raw, playlist_url)
-        return _build_proxy_url(request, absolute, referer)
+        return _build_proxy_url(request, absolute, child_referer)
 
     lines = []
     for line in content.split("\n"):

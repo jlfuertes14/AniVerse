@@ -38,6 +38,30 @@ def _expand_title_candidates(title: str | None) -> list[str]:
     return candidates
 
 
+def _normalize_title(value: str | None) -> str:
+    if not value:
+        return ""
+    normalized = value.lower()
+    normalized = normalized.replace("&", " and ")
+    normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
+    normalized = re.sub(r"\b(season|part|cour|tv)\b", " ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return normalized
+
+
+def _mapping_retry_active(mapping: dict | None) -> bool:
+    if not mapping:
+        return False
+    retry_after = mapping.get("mapping_retry_after")
+    if not retry_after:
+        return False
+    try:
+        retry_at = datetime.fromisoformat(str(retry_after).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return retry_at > datetime.now(timezone.utc)
+
+
 async def _build_reanime_title_candidates(mal_id: int | None, fallback_title: str) -> list[str]:
     candidates: list[str] = []
     for title in _expand_title_candidates(fallback_title):
@@ -98,6 +122,7 @@ async def search_reanime_by_title(title: str, mal_id: int = None):
                         "anilist_id": mal_id,
                         "slug": slug, 
                         "title": title,
+                        "title_normalized": _normalize_title(title),
                         "provider": "reanime",
                         "last_mapped_at": datetime.now(timezone.utc).isoformat(),
                     }},
@@ -258,11 +283,20 @@ async def _map_single_release(item: dict, semaphore: asyncio.Semaphore | None = 
     from backend.services import jikan_service
     
     title = item["title"]
+    title_normalized = _normalize_title(title)
     # 1. Try finding in existing Re:ANIME mappings first (exact title match)
-    existing = await db["provider_mappings"].find_one({"title": title, "provider": "reanime"})
+    existing = await db["provider_mappings"].find_one({
+        "provider": "reanime",
+        "$or": [
+            {"title_normalized": title_normalized},
+            {"title": title},
+        ],
+    })
     existing_mal_id = existing.get("mal_id") if existing else None
     if isinstance(existing_mal_id, int) and existing_mal_id > 0:
         item["mal_id"] = existing_mal_id
+        return item
+    if _mapping_retry_active(existing):
         return item
 
     # 2. Not in cache, try Jikan search
@@ -295,18 +329,46 @@ async def _map_single_release(item: dict, semaphore: asyncio.Semaphore | None = 
                 
                 # 3. CRITICAL: Cache this mapping for future instant lookups
                 await db["provider_mappings"].update_one(
-                    {"title": title, "provider": "reanime"},
+                    {"provider": "reanime", "title_normalized": title_normalized},
                     {"$set": {
                         "title": title,
+                        "title_normalized": title_normalized,
                         "mal_id": mal_id,
                         "anilist_id": mal_id,
                         "slug": item.get("slug"),
                         "provider": "reanime",
-                        "last_mapped_at": datetime.now(timezone.utc).isoformat()
+                        "last_mapped_at": datetime.now(timezone.utc).isoformat(),
+                        "mapping_retry_after": None,
+                        "mapping_status": "ok",
                     }},
                     upsert=True
                 )
+            else:
+                await db["provider_mappings"].update_one(
+                    {"provider": "reanime", "title_normalized": title_normalized},
+                    {"$set": {
+                        "title": title,
+                        "title_normalized": title_normalized,
+                        "provider": "reanime",
+                        "mapping_status": "not_found",
+                        "mapping_retry_after": (datetime.now(timezone.utc) + timedelta(hours=6)).isoformat(),
+                    }},
+                    upsert=True,
+                )
     except Exception as e:
+        status = "rate_limited" if "429" in str(e) else "lookup_failed"
+        retry_ttl = timedelta(minutes=5) if status == "rate_limited" else timedelta(hours=1)
+        await db["provider_mappings"].update_one(
+            {"provider": "reanime", "title_normalized": title_normalized},
+            {"$set": {
+                "title": title,
+                "title_normalized": title_normalized,
+                "provider": "reanime",
+                "mapping_status": status,
+                "mapping_retry_after": (datetime.now(timezone.utc) + retry_ttl).isoformat(),
+            }},
+            upsert=True,
+        )
         print(f"[Re:ANIME Service] Mapping failed for {title}: {e}")
     
     return item

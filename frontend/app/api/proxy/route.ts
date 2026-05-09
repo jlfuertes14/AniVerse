@@ -33,6 +33,8 @@ function buildProxyUrl(requestUrl: URL, targetUrl: string, referer: string) {
 }
 
 function rewritePlaylist(content: string, playlistUrl: string, referer: string, requestUrl: URL) {
+    const childReferer = playlistUrl || referer;
+
     return content
         .split("\n")
         .map((line) => {
@@ -43,16 +45,16 @@ function rewritePlaylist(content: string, playlistUrl: string, referer: string, 
                 return line
                     .replace(/URI="([^"]+)"/g, (_match, uri) => {
                         const absolute = toAbsoluteUrl(uri, playlistUrl);
-                        return `URI="${buildProxyUrl(requestUrl, absolute, referer)}"`;
+                        return `URI="${buildProxyUrl(requestUrl, absolute, childReferer)}"`;
                     })
                     .replace(/URI='([^']+)'/g, (_match, uri) => {
                         const absolute = toAbsoluteUrl(uri, playlistUrl);
-                        return `URI='${buildProxyUrl(requestUrl, absolute, referer)}'`;
+                        return `URI='${buildProxyUrl(requestUrl, absolute, childReferer)}'`;
                     });
             }
 
             const absolute = toAbsoluteUrl(trimmed, playlistUrl);
-            return buildProxyUrl(requestUrl, absolute, referer);
+            return buildProxyUrl(requestUrl, absolute, childReferer);
         })
         .join("\n");
 }

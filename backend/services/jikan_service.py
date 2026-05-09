@@ -6,22 +6,91 @@ import httpx
 import asyncio
 from typing import Optional
 from backend.models.schemas import AnimeResult, AnimeDetail
-from backend.cache import metadata_cache, search_cache, get_cache_key
+from backend.cache import (
+    metadata_cache,
+    search_cache,
+    get_cache_key,
+    get_persistent_cache,
+    set_persistent_cache,
+    set_persistent_failure,
+    get_singleflight_lock,
+)
 
 BASE_URL = "https://api.jikan.moe/v4"
+MAX_RETRIES = 3
+SEARCH_CACHE_TTL_SECONDS = 60 * 60 * 6
+DETAIL_CACHE_TTL_SECONDS = 60 * 60 * 12
+RATE_LIMIT_CACHE_TTL_SECONDS = 60 * 3
 
 # Rate limit: ~3 requests/sec
 _rate_semaphore = asyncio.Semaphore(3)
 
 
+def _serialize_anime_result(result: AnimeResult) -> dict:
+    return result.model_dump()
+
+
+def _deserialize_anime_result(data: dict) -> AnimeResult:
+    return AnimeResult(**data)
+
+
+def _serialize_anime_detail(detail: AnimeDetail) -> dict:
+    return detail.model_dump()
+
+
+def _deserialize_anime_detail(data: dict) -> AnimeDetail:
+    return AnimeDetail(**data)
+
+
+def _serialize_paginated_results(results: dict) -> dict:
+    return {
+        **results,
+        "data": [_serialize_anime_result(item) for item in results.get("data", [])],
+    }
+
+
+def _deserialize_paginated_results(data: dict) -> dict:
+    return {
+        **data,
+        "data": [_deserialize_anime_result(item) for item in data.get("data", [])],
+    }
+
+
+def _retry_delay_seconds(response: httpx.Response | None, attempt: int) -> float:
+    if response is not None:
+        retry_after = response.headers.get("Retry-After")
+        if retry_after:
+            try:
+                return max(float(retry_after), 1.0)
+            except ValueError:
+                pass
+    return max(1.0, 1.5 * (attempt + 1))
+
+
+def _is_rate_limited(error: Exception) -> bool:
+    return isinstance(error, httpx.HTTPStatusError) and error.response.status_code == 429
+
+
 async def _get(endpoint: str, params: dict = None) -> dict:
     """Make a rate-limited GET request to Jikan API."""
     async with _rate_semaphore:
+        last_error = None
         async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.get(f"{BASE_URL}{endpoint}", params=params)
-            response.raise_for_status()
-            await asyncio.sleep(0.35)  # Respect rate limit
-            return response.json()
+            for attempt in range(MAX_RETRIES):
+                try:
+                    response = await client.get(f"{BASE_URL}{endpoint}", params=params)
+                    response.raise_for_status()
+                    await asyncio.sleep(0.35)  # Respect rate limit
+                    return response.json()
+                except (httpx.HTTPStatusError, httpx.ConnectError, httpx.ReadTimeout) as e:
+                    last_error = e
+                    if attempt < MAX_RETRIES - 1:
+                        wait = _retry_delay_seconds(getattr(e, "response", None), attempt)
+                        print(f"[Jikan] Request failed (attempt {attempt + 1}/{MAX_RETRIES}): {e}. Retrying in {wait}s...")
+                        await asyncio.sleep(wait)
+                    else:
+                        print(f"[Jikan] All {MAX_RETRIES} attempts failed: {e}")
+        raise last_error
 
 
 def _parse_anime(data: dict) -> AnimeResult:
@@ -174,39 +243,65 @@ async def search_anime(
     cache_key = get_cache_key("jikan_search", query, genres, producers, type_filter, status, rating, start_date, end_date, page)
     if cache_key in search_cache:
         return search_cache[cache_key]
+    cached_doc = await get_persistent_cache(cache_key)
+    if cached_doc and cached_doc.get("data"):
+        hydrated = _deserialize_paginated_results(cached_doc["data"])
+        search_cache[cache_key] = hydrated
+        return hydrated
 
-    params = {"page": page, "limit": limit, "order_by": order_by, "sort": sort, "sfw": True}
-    if query:
-        params["q"] = query
-    if genres:
-        params["genres"] = genres
-    if producers:
-        params["producers"] = producers
-    if type_filter:
-        params["type"] = type_filter
-    if min_score:
-        params["min_score"] = min_score
-    if max_score:
-        params["max_score"] = max_score
-    if status:
-        params["status"] = status
-    if rating:
-        params["rating"] = rating
-    if start_date:
-        params["start_date"] = start_date
-    if end_date:
-        params["end_date"] = end_date
+    lock = get_singleflight_lock(cache_key)
+    async with lock:
+        if cache_key in search_cache:
+            return search_cache[cache_key]
+        cached_doc = await get_persistent_cache(cache_key)
+        if cached_doc and cached_doc.get("data"):
+            hydrated = _deserialize_paginated_results(cached_doc["data"])
+            search_cache[cache_key] = hydrated
+            return hydrated
 
-    data = await _get("/anime", params)
-    pagination = data.get("pagination", {})
-    results = {
-        "data": [_parse_anime(a) for a in data.get("data", [])],
-        "total": pagination.get("items", {}).get("total", 0),
-        "has_next": pagination.get("has_next_page", False),
-        "page": page,
-    }
-    search_cache[cache_key] = results
-    return results
+        params = {"page": page, "limit": limit, "order_by": order_by, "sort": sort, "sfw": True}
+        if query:
+            params["q"] = query
+        if genres:
+            params["genres"] = genres
+        if producers:
+            params["producers"] = producers
+        if type_filter:
+            params["type"] = type_filter
+        if min_score:
+            params["min_score"] = min_score
+        if max_score:
+            params["max_score"] = max_score
+        if status:
+            params["status"] = status
+        if rating:
+            params["rating"] = rating
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        try:
+            data = await _get("/anime", params)
+        except Exception as e:
+            if _is_rate_limited(e):
+                await set_persistent_failure(cache_key, status="rate_limited", ttl_seconds=RATE_LIMIT_CACHE_TTL_SECONDS, detail=str(e))
+                stale_doc = await get_persistent_cache(cache_key, allow_stale=True)
+                if stale_doc and stale_doc.get("data"):
+                    hydrated = _deserialize_paginated_results(stale_doc["data"])
+                    search_cache[cache_key] = hydrated
+                    return hydrated
+            raise
+        pagination = data.get("pagination", {})
+        results = {
+            "data": [_parse_anime(a) for a in data.get("data", [])],
+            "total": pagination.get("items", {}).get("total", 0),
+            "has_next": pagination.get("has_next_page", False),
+            "page": page,
+        }
+        search_cache[cache_key] = results
+        await set_persistent_cache(cache_key, _serialize_paginated_results(results), ttl_seconds=SEARCH_CACHE_TTL_SECONDS)
+        return results
 
 
 async def get_top_anime(page: int = 1, limit: int = 24, filter_type: str = None) -> dict:
@@ -242,33 +337,74 @@ async def get_anime_detail(mal_id: int) -> AnimeDetail:
             return hydrated_cached_detail
         except Exception:
             return cached_detail
+    cached_doc = await get_persistent_cache(cache_key)
+    if cached_doc and cached_doc.get("data"):
+        cached_detail = _deserialize_anime_detail(cached_doc["data"])
+        try:
+            hydrated_cached_detail = await _hydrate_related_images(cached_detail)
+            search_cache[cache_key] = hydrated_cached_detail
+            return hydrated_cached_detail
+        except Exception:
+            search_cache[cache_key] = cached_detail
+            return cached_detail
 
-    data = await _get(f"/anime/{mal_id}/full")
-    detail = _parse_anime_detail(data.get("data", {}))
+    lock = get_singleflight_lock(cache_key)
+    async with lock:
+        if cache_key in search_cache:
+            cached_detail = search_cache[cache_key]
+            try:
+                hydrated_cached_detail = await _hydrate_related_images(cached_detail)
+                search_cache[cache_key] = hydrated_cached_detail
+                return hydrated_cached_detail
+            except Exception:
+                return cached_detail
+        cached_doc = await get_persistent_cache(cache_key)
+        if cached_doc and cached_doc.get("data"):
+            cached_detail = _deserialize_anime_detail(cached_doc["data"])
+            try:
+                hydrated_cached_detail = await _hydrate_related_images(cached_detail)
+                search_cache[cache_key] = hydrated_cached_detail
+                return hydrated_cached_detail
+            except Exception:
+                search_cache[cache_key] = cached_detail
+                return cached_detail
 
-    # Get characters
-    try:
-        char_data = await _get(f"/anime/{mal_id}/characters")
-        characters = []
-        for char in char_data.get("data", [])[:12]:
-            character = char.get("character", {})
-            char_images = character.get("images", {}).get("jpg", {})
-            characters.append({
-                "name": character.get("name", ""),
-                "role": char.get("role", ""),
-                "image_url": char_images.get("image_url", ""),
-            })
-        detail.characters = characters
-    except Exception:
-        pass
+        try:
+            data = await _get(f"/anime/{mal_id}/full")
+        except Exception as e:
+            if _is_rate_limited(e):
+                await set_persistent_failure(cache_key, status="rate_limited", ttl_seconds=RATE_LIMIT_CACHE_TTL_SECONDS, detail=str(e))
+                stale_doc = await get_persistent_cache(cache_key, allow_stale=True)
+                if stale_doc and stale_doc.get("data"):
+                    cached_detail = _deserialize_anime_detail(stale_doc["data"])
+                    search_cache[cache_key] = cached_detail
+                    return cached_detail
+            raise
+        detail = _parse_anime_detail(data.get("data", {}))
 
-    try:
-        detail = await _hydrate_related_images(detail)
-    except Exception:
-        pass
+        try:
+            char_data = await _get(f"/anime/{mal_id}/characters")
+            characters = []
+            for char in char_data.get("data", [])[:12]:
+                character = char.get("character", {})
+                char_images = character.get("images", {}).get("jpg", {})
+                characters.append({
+                    "name": character.get("name", ""),
+                    "role": char.get("role", ""),
+                    "image_url": char_images.get("image_url", ""),
+                })
+            detail.characters = characters
+        except Exception:
+            pass
 
-    search_cache[cache_key] = detail
-    return detail
+        try:
+            detail = await _hydrate_related_images(detail)
+        except Exception:
+            pass
+
+        search_cache[cache_key] = detail
+        await set_persistent_cache(cache_key, _serialize_anime_detail(detail), ttl_seconds=DETAIL_CACHE_TTL_SECONDS)
+        return detail
 
 
 async def get_seasonal_anime(year: int, season: str, page: int = 1) -> dict:

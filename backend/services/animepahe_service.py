@@ -352,6 +352,7 @@ async def _save_provider_mapping(
     db = get_db()
     payload = {
         "title": title,
+        "title_normalized": _normalize_title(title),
         "last_catalog_check_at": _utc_now_iso(),
         "provider": "animepahe",
     }
@@ -746,10 +747,19 @@ async def _map_single_release(item: dict) -> dict:
     from backend.services import jikan_service
     
     title = item["title"]
+    title_normalized = _normalize_title(title)
     # 1. Try finding in existing mappings first
-    existing = await db["provider_mappings"].find_one({"title": title, "provider": "animepahe"})
-    if existing:
+    existing = await db["provider_mappings"].find_one({
+        "provider": "animepahe",
+        "$or": [
+            {"title_normalized": title_normalized},
+            {"title": title},
+        ],
+    })
+    if existing and isinstance(existing.get("mal_id"), int):
         item["mal_id"] = existing["mal_id"]
+    elif existing and existing.get("mapping_retry_after") and _parse_iso_datetime(existing.get("mapping_retry_after")) and _parse_iso_datetime(existing.get("mapping_retry_after")) > datetime.now(timezone.utc):
+        pass
     else:
         try:
             # 2. Not in cache, try Jikan search
@@ -773,17 +783,45 @@ async def _map_single_release(item: dict) -> dict:
                     
                     # 3. Cache this mapping for future instant lookups
                     await db["provider_mappings"].update_one(
-                        {"title": title, "provider": "animepahe"},
+                        {"provider": "animepahe", "title_normalized": title_normalized},
                         {"$set": {
                             "title": title,
+                            "title_normalized": title_normalized,
                             "mal_id": mal_id,
                             "session": item.get("session"),
                             "provider": "animepahe",
-                            "last_mapped_at": datetime.now(timezone.utc).isoformat()
+                            "last_mapped_at": datetime.now(timezone.utc).isoformat(),
+                            "mapping_retry_after": None,
+                            "mapping_status": "ok",
+                        }},
+                        upsert=True
+                    )
+                else:
+                    await db["provider_mappings"].update_one(
+                        {"provider": "animepahe", "title_normalized": title_normalized},
+                        {"$set": {
+                            "title": title,
+                            "title_normalized": title_normalized,
+                            "provider": "animepahe",
+                            "mapping_status": "not_found",
+                            "mapping_retry_after": (datetime.now(timezone.utc) + timedelta(hours=6)).isoformat(),
                         }},
                         upsert=True
                     )
         except Exception as e:
+            status = "rate_limited" if "429" in str(e) else "lookup_failed"
+            retry_ttl = timedelta(minutes=5) if status == "rate_limited" else timedelta(hours=1)
+            await db["provider_mappings"].update_one(
+                {"provider": "animepahe", "title_normalized": title_normalized},
+                {"$set": {
+                    "title": title,
+                    "title_normalized": title_normalized,
+                    "provider": "animepahe",
+                    "mapping_status": status,
+                    "mapping_retry_after": (datetime.now(timezone.utc) + retry_ttl).isoformat(),
+                }},
+                upsert=True
+            )
             print(f"[AnimePahe Service] Mapping failed for {title}: {e}")
 
     # Use raw episode from provider for latest releases

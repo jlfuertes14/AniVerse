@@ -7,15 +7,65 @@ import asyncio
 import os
 from typing import Optional
 from backend.models.schemas import AnimeResult
-from backend.cache import search_cache, trending_cache, get_cache_key
+from backend.cache import (
+    search_cache,
+    trending_cache,
+    get_cache_key,
+    get_persistent_cache,
+    set_persistent_cache,
+    set_persistent_failure,
+    get_singleflight_lock,
+)
 
 GRAPHQL_URL = "https://graphql.anilist.co"
 
 MAX_RETRIES = 3
+DETAIL_CACHE_TTL_SECONDS = 60 * 60 * 12
+TRENDING_CACHE_TTL_SECONDS = 60 * 20
+SPOTLIGHT_CACHE_TTL_SECONDS = 60 * 20
+SCHEDULE_CACHE_TTL_SECONDS = 60 * 30
+RATE_LIMIT_CACHE_TTL_SECONDS = 60 * 3
 
 ANILIST_TOKEN = os.getenv("ANILIST_TOKEN")
 ANILIST_USER_AGENT = os.getenv("ANILIST_USER_AGENT", "AnimeDiscoveryEngine/1.0")
 ANILIST_REFERER = os.getenv("ANILIST_REFERER")
+
+
+def _serialize_anime_result(result: AnimeResult) -> dict:
+    return result.model_dump()
+
+
+def _deserialize_anime_result(data: dict) -> AnimeResult:
+    return AnimeResult(**data)
+
+
+def _serialize_paginated_results(results: dict) -> dict:
+    return {
+        **results,
+        "data": [_serialize_anime_result(item) for item in results.get("data", [])],
+    }
+
+
+def _deserialize_paginated_results(data: dict) -> dict:
+    return {
+        **data,
+        "data": [_deserialize_anime_result(item) for item in data.get("data", [])],
+    }
+
+
+def _retry_delay_seconds(error: Exception, attempt: int) -> float:
+    if isinstance(error, httpx.HTTPStatusError):
+        retry_after = error.response.headers.get("Retry-After")
+        if retry_after:
+            try:
+                return max(float(retry_after), 1.0)
+            except ValueError:
+                pass
+    return 1.5 * (attempt + 1)
+
+
+def _is_rate_limited(error: Exception) -> bool:
+    return isinstance(error, httpx.HTTPStatusError) and error.response.status_code == 429
 
 
 async def _query(query: str, variables: dict = None) -> dict:
@@ -43,7 +93,7 @@ async def _query(query: str, variables: dict = None) -> dict:
         except (httpx.HTTPStatusError, httpx.ConnectError, httpx.ReadTimeout) as e:
             last_error = e
             if attempt < MAX_RETRIES - 1:
-                wait = 1.5 * (attempt + 1)
+                wait = _retry_delay_seconds(e, attempt)
                 print(f"[AniList] Request failed (attempt {attempt + 1}/{MAX_RETRIES}): {e}. Retrying in {wait}s...")
                 await asyncio.sleep(wait)
             else:
@@ -116,27 +166,45 @@ async def get_anilist_id_by_mal_id(mal_id: int) -> int | None:
 
 async def get_airing_schedule_by_mal_id(mal_id: int) -> dict:
     """Get AniList airing metadata for a MAL ID."""
-    query_str = """
-    query ($malId: Int) {
-        Media(idMal: $malId, type: ANIME) {
-            status
-            nextAiringEpisode {
-                episode
-                airingAt
+    cache_key = get_cache_key("anilist_airing_schedule", mal_id)
+    cached_doc = await get_persistent_cache(cache_key)
+    if cached_doc and cached_doc.get("data"):
+        return cached_doc["data"]
+
+    lock = get_singleflight_lock(cache_key)
+    async with lock:
+        cached_doc = await get_persistent_cache(cache_key)
+        if cached_doc and cached_doc.get("data"):
+            return cached_doc["data"]
+
+        query_str = """
+        query ($malId: Int) {
+            Media(idMal: $malId, type: ANIME) {
+                status
+                nextAiringEpisode {
+                    episode
+                    airingAt
+                }
             }
         }
-    }
-    """
-    data = await _query(query_str, {"malId": mal_id})
-    media = data.get("data", {}).get("Media") or {}
-    next_airing = media.get("nextAiringEpisode") or {}
+        """
+        try:
+            data = await _query(query_str, {"malId": mal_id})
+        except Exception as e:
+            if _is_rate_limited(e):
+                await set_persistent_failure(cache_key, status="rate_limited", ttl_seconds=RATE_LIMIT_CACHE_TTL_SECONDS, detail=str(e))
+            raise
+        media = data.get("data", {}).get("Media") or {}
+        next_airing = media.get("nextAiringEpisode") or {}
 
-    return {
-        "provider_status": media.get("status"),
-        "is_airing": media.get("status") == "RELEASING",
-        "next_airing_episode": next_airing.get("episode"),
-        "next_airing_at": next_airing.get("airingAt"),
-    }
+        result = {
+            "provider_status": media.get("status"),
+            "is_airing": media.get("status") == "RELEASING",
+            "next_airing_episode": next_airing.get("episode"),
+            "next_airing_at": next_airing.get("airingAt"),
+        }
+        await set_persistent_cache(cache_key, result, ttl_seconds=SCHEDULE_CACHE_TTL_SECONDS)
+        return result
 
 
 async def get_trending(page: int = 1, per_page: int = 24) -> dict:
@@ -144,29 +212,55 @@ async def get_trending(page: int = 1, per_page: int = 24) -> dict:
     cache_key = get_cache_key("anilist_trending", page)
     if cache_key in trending_cache:
         return trending_cache[cache_key]
+    cached_doc = await get_persistent_cache(cache_key)
+    if cached_doc and cached_doc.get("data"):
+        hydrated = _deserialize_paginated_results(cached_doc["data"])
+        trending_cache[cache_key] = hydrated
+        return hydrated
 
-    query_str = f"""
-    query ($page: Int, $perPage: Int) {{
-        Page(page: $page, perPage: $perPage) {{
-            pageInfo {{ total currentPage hasNextPage }}
-            media(sort: TRENDING_DESC, type: ANIME) {{
-                {MEDIA_FIELDS}
+    lock = get_singleflight_lock(cache_key)
+    async with lock:
+        if cache_key in trending_cache:
+            return trending_cache[cache_key]
+        cached_doc = await get_persistent_cache(cache_key)
+        if cached_doc and cached_doc.get("data"):
+            hydrated = _deserialize_paginated_results(cached_doc["data"])
+            trending_cache[cache_key] = hydrated
+            return hydrated
+
+        query_str = f"""
+        query ($page: Int, $perPage: Int) {{
+            Page(page: $page, perPage: $perPage) {{
+                pageInfo {{ total currentPage hasNextPage }}
+                media(sort: TRENDING_DESC, type: ANIME) {{
+                    {MEDIA_FIELDS}
+                }}
             }}
         }}
-    }}
-    """
-    data = await _query(query_str, {"page": page, "perPage": per_page})
-    page_data = data.get("data", {}).get("Page", {})
-    page_info = page_data.get("pageInfo", {})
+        """
+        try:
+            data = await _query(query_str, {"page": page, "perPage": per_page})
+        except Exception as e:
+            if _is_rate_limited(e):
+                await set_persistent_failure(cache_key, status="rate_limited", ttl_seconds=RATE_LIMIT_CACHE_TTL_SECONDS, detail=str(e))
+                stale_doc = await get_persistent_cache(cache_key, allow_stale=True)
+                if stale_doc and stale_doc.get("data"):
+                    hydrated = _deserialize_paginated_results(stale_doc["data"])
+                    trending_cache[cache_key] = hydrated
+                    return hydrated
+            raise
+        page_data = data.get("data", {}).get("Page", {})
+        page_info = page_data.get("pageInfo", {})
 
-    results = {
-        "data": [_parse_media(m) for m in page_data.get("media", [])],
-        "total": page_info.get("total", 0),
-        "has_next": page_info.get("hasNextPage", False),
-        "page": page,
-    }
-    trending_cache[cache_key] = results
-    return results
+        results = {
+            "data": [_parse_media(m) for m in page_data.get("media", [])],
+            "total": page_info.get("total", 0),
+            "has_next": page_info.get("hasNextPage", False),
+            "page": page,
+        }
+        trending_cache[cache_key] = results
+        await set_persistent_cache(cache_key, _serialize_paginated_results(results), ttl_seconds=TRENDING_CACHE_TTL_SECONDS)
+        return results
 
 
 async def search_by_tags(
@@ -239,80 +333,100 @@ async def get_anime_detail(anilist_id: int) -> dict:
     cache_key = get_cache_key("anilist_detail", anilist_id)
     if cache_key in search_cache:
         return search_cache[cache_key]
+    cached_doc = await get_persistent_cache(cache_key)
+    if cached_doc and cached_doc.get("data"):
+        search_cache[cache_key] = cached_doc["data"]
+        return cached_doc["data"]
 
-    query_str = f"""
-    query ($id: Int) {{
-        Media(id: $id, type: ANIME) {{
-            {MEDIA_FIELDS}
-            bannerImage
-            trailer {{ id site thumbnail }}
-            duration
-            startDate {{ year month day }}
-            endDate {{ year month day }}
-            popularity
-            trending
-            favourites
-            characters(sort: ROLE, perPage: 12) {{
-                nodes {{
-                    name {{ full }}
-                    image {{ medium }}
+    lock = get_singleflight_lock(cache_key)
+    async with lock:
+        if cache_key in search_cache:
+            return search_cache[cache_key]
+        cached_doc = await get_persistent_cache(cache_key)
+        if cached_doc and cached_doc.get("data"):
+            search_cache[cache_key] = cached_doc["data"]
+            return cached_doc["data"]
+
+        query_str = f"""
+        query ($id: Int) {{
+            Media(id: $id, type: ANIME) {{
+                {MEDIA_FIELDS}
+                bannerImage
+                trailer {{ id site thumbnail }}
+                duration
+                startDate {{ year month day }}
+                endDate {{ year month day }}
+                popularity
+                trending
+                favourites
+                characters(sort: ROLE, perPage: 12) {{
+                    nodes {{
+                        name {{ full }}
+                        image {{ medium }}
+                    }}
                 }}
-            }}
-            recommendations(perPage: 8, sort: RATING_DESC) {{
-                nodes {{
-                    mediaRecommendation {{
-                        {MEDIA_FIELDS}
+                recommendations(perPage: 8, sort: RATING_DESC) {{
+                    nodes {{
+                        mediaRecommendation {{
+                            {MEDIA_FIELDS}
+                        }}
                     }}
                 }}
             }}
         }}
-    }}
-    """
-    data = await _query(query_str, {"id": anilist_id})
-    media = data.get("data", {}).get("Media", {})
+        """
+        try:
+            data = await _query(query_str, {"id": anilist_id})
+        except Exception as e:
+            if _is_rate_limited(e):
+                await set_persistent_failure(cache_key, status="rate_limited", ttl_seconds=RATE_LIMIT_CACHE_TTL_SECONDS, detail=str(e))
+                stale_doc = await get_persistent_cache(cache_key, allow_stale=True)
+                if stale_doc and stale_doc.get("data"):
+                    search_cache[cache_key] = stale_doc["data"]
+                    return stale_doc["data"]
+            raise
+        media = data.get("data", {}).get("Media", {})
 
-    result = _parse_media(media)
+        result = _parse_media(media)
+        trailer = media.get("trailer", {}) or {}
+        trailer_url = None
+        if trailer.get("site") == "youtube":
+            trailer_url = f"https://www.youtube.com/watch?v={trailer.get('id')}"
 
-    # Add extra detail fields
-    trailer = media.get("trailer", {}) or {}
-    trailer_url = None
-    if trailer.get("site") == "youtube":
-        trailer_url = f"https://www.youtube.com/watch?v={trailer.get('id')}"
+        start_date = media.get("startDate", {}) or {}
+        aired_str = ""
+        if start_date.get("year"):
+            aired_str = f"{start_date.get('year')}"
+            if start_date.get("month"):
+                aired_str = f"{start_date.get('month')}/{aired_str}"
 
-    start_date = media.get("startDate", {}) or {}
-    end_date = media.get("endDate", {}) or {}
-    aired_str = ""
-    if start_date.get("year"):
-        aired_str = f"{start_date.get('year')}"
-        if start_date.get("month"):
-            aired_str = f"{start_date.get('month')}/{aired_str}"
+        characters = []
+        for char_node in (media.get("characters", {}).get("nodes", []) or []):
+            characters.append({
+                "name": char_node.get("name", {}).get("full", ""),
+                "image_url": char_node.get("image", {}).get("medium", ""),
+            })
 
-    characters = []
-    for char_node in (media.get("characters", {}).get("nodes", []) or []):
-        characters.append({
-            "name": char_node.get("name", {}).get("full", ""),
-            "image_url": char_node.get("image", {}).get("medium", ""),
-        })
+        recommendations = []
+        for rec_node in (media.get("recommendations", {}).get("nodes", []) or []):
+            rec_media = rec_node.get("mediaRecommendation")
+            if rec_media:
+                recommendations.append(_parse_media(rec_media))
 
-    recommendations = []
-    for rec_node in (media.get("recommendations", {}).get("nodes", []) or []):
-        rec_media = rec_node.get("mediaRecommendation")
-        if rec_media:
-            recommendations.append(_parse_media(rec_media))
+        detail = {
+            **result.model_dump(),
+            "banner_image": media.get("bannerImage"),
+            "trailer_url": trailer_url,
+            "duration": f"{media.get('duration', 'N/A')} min" if media.get("duration") else None,
+            "aired": aired_str,
+            "popularity": media.get("popularity"),
+            "characters": characters,
+            "recommendations": [r.model_dump() for r in recommendations],
+        }
 
-    detail = {
-        **result.model_dump(),
-        "banner_image": media.get("bannerImage"),
-        "trailer_url": trailer_url,
-        "duration": f"{media.get('duration', 'N/A')} min" if media.get("duration") else None,
-        "aired": aired_str,
-        "popularity": media.get("popularity"),
-        "characters": characters,
-        "recommendations": [r.model_dump() for r in recommendations],
-    }
-
-    search_cache[cache_key] = detail
-    return detail
+        search_cache[cache_key] = detail
+        await set_persistent_cache(cache_key, detail, ttl_seconds=DETAIL_CACHE_TTL_SECONDS)
+        return detail
 
 
 async def get_spotlight(count: int = 5) -> list[dict]:
@@ -320,33 +434,56 @@ async def get_spotlight(count: int = 5) -> list[dict]:
     cache_key = get_cache_key("anilist_spotlight", count)
     if cache_key in trending_cache:
         return trending_cache[cache_key]
+    cached_doc = await get_persistent_cache(cache_key)
+    if cached_doc and cached_doc.get("data"):
+        trending_cache[cache_key] = cached_doc["data"]
+        return cached_doc["data"]
 
-    query_str = f"""
-    query ($perPage: Int) {{
-        Page(page: 1, perPage: $perPage) {{
-            media(sort: TRENDING_DESC, type: ANIME, isAdult: false) {{
-                {MEDIA_FIELDS}
-                bannerImage
-                trailer {{ id site thumbnail }}
+    lock = get_singleflight_lock(cache_key)
+    async with lock:
+        if cache_key in trending_cache:
+            return trending_cache[cache_key]
+        cached_doc = await get_persistent_cache(cache_key)
+        if cached_doc and cached_doc.get("data"):
+            trending_cache[cache_key] = cached_doc["data"]
+            return cached_doc["data"]
+
+        query_str = f"""
+        query ($perPage: Int) {{
+            Page(page: 1, perPage: $perPage) {{
+                media(sort: TRENDING_DESC, type: ANIME, isAdult: false) {{
+                    {MEDIA_FIELDS}
+                    bannerImage
+                    trailer {{ id site thumbnail }}
+                }}
             }}
         }}
-    }}
-    """
-    data = await _query(query_str, {"perPage": count})
-    media_list = data.get("data", {}).get("Page", {}).get("media", [])
+        """
+        try:
+            data = await _query(query_str, {"perPage": count})
+        except Exception as e:
+            if _is_rate_limited(e):
+                await set_persistent_failure(cache_key, status="rate_limited", ttl_seconds=RATE_LIMIT_CACHE_TTL_SECONDS, detail=str(e))
+                stale_doc = await get_persistent_cache(cache_key, allow_stale=True)
+                if stale_doc and stale_doc.get("data"):
+                    trending_cache[cache_key] = stale_doc["data"]
+                    return stale_doc["data"]
+            raise
+        media_list = data.get("data", {}).get("Page", {}).get("media", [])
 
-    results = []
-    for media in media_list:
-        parsed = _parse_media(media)
-        trailer = media.get("trailer", {}) or {}
-        trailer_url = None
-        if trailer.get("site") == "youtube":
-            trailer_url = f"https://www.youtube.com/watch?v={trailer.get('id')}"
-        results.append({
-            **parsed.model_dump(),
-            "banner_image": media.get("bannerImage"),
-            "trailer_url": trailer_url,
-        })
+        results = []
+        for media in media_list:
+            parsed = _parse_media(media)
+            trailer = media.get("trailer", {}) or {}
+            trailer_url = None
+            if trailer.get("site") == "youtube":
+                trailer_url = f"https://www.youtube.com/watch?v={trailer.get('id')}"
+            results.append({
+                **parsed.model_dump(),
+                "banner_image": media.get("bannerImage"),
+                "trailer_url": trailer_url,
+            })
 
-    trending_cache[cache_key] = results
-    return results
+        trending_cache[cache_key] = results
+        await set_persistent_cache(cache_key, results, ttl_seconds=SPOTLIGHT_CACHE_TTL_SECONDS)
+        return results

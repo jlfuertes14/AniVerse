@@ -58,6 +58,12 @@ async def init_db():
     # provider_mappings collection indexes
     await db["provider_mappings"].create_index([("mal_id", 1), ("provider", 1)], unique=True)
     await db["provider_mappings"].create_index([("provider", 1), ("is_airing", 1), ("last_catalog_check_at", 1)])
+    await db["provider_mappings"].create_index([("provider", 1), ("title_normalized", 1)])
+    await db["provider_mappings"].create_index([("provider", 1), ("mapping_retry_after", 1)])
+
+    # persistent cache collection indexes
+    await db["cache"].create_index("key", unique=True)
+    await db["cache"].create_index("expires_at", expireAfterSeconds=0)
 
     # refresh_locks collection indexes (TTL-based distributed locks)
     await db["refresh_locks"].create_index("key", unique=True)
