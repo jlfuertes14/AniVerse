@@ -96,6 +96,16 @@ export default function WatchPlaybackClient({
                                     {chunk.label}
                                 </button>
                             ))}
+                            {hasNextEpisode && (
+                                <button
+                                    type="button"
+                                    className="sidebar-next-btn"
+                                    data-next-episode={currentEpisode + 1}
+                                    onClick={() => navigateToEpisode(currentEpisode + 1)}
+                                >
+                                    ▶ Ep {currentEpisode + 1}
+                                </button>
+                            )}
                         </div>
                         <div className="watch-episode-search">
                         <input
@@ -172,7 +182,7 @@ export default function WatchPlaybackClient({
                     {hasNextEpisode && (
                         <button
                             type="button"
-                            className="watch-next-ep-btn desktop-next-btn"
+                            className="watch-next-ep-btn watch-next-ep-desktop"
                             onClick={() => navigateToEpisode(currentEpisode + 1)}
                         >
                             <span className="play-icon">▶</span>
@@ -181,17 +191,7 @@ export default function WatchPlaybackClient({
                     )}
                 </div>
 
-                {/* Mobile Next Episode Button */}
-                {hasNextEpisode && (
-                    <button
-                        type="button"
-                        className="watch-next-ep-btn mobile-next-btn"
-                        onClick={() => navigateToEpisode(currentEpisode + 1)}
-                    >
-                        <span className="play-icon">▶</span>
-                        NEXT EPISODE (Ep {currentEpisode + 1})
-                    </button>
-                )}
+
 
                 {/* New Mobile Episode Guide */}
                 {!isMovie && (episodeItems.length > 1) && (
