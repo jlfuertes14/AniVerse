@@ -26,6 +26,7 @@ from backend.database import init_db
 async def lifespan(app: FastAPI):
     """Initialize database and build recommendation model on startup."""
     await init_db()
+    print(f"[Zyte API] Configured: {'yes' if os.environ.get('ZYTE_API_KEY') else 'no'}")
     print("[AI] Building recommendation model in background...")
     recommendation_task = asyncio.create_task(recommendation_engine.build_model(count=200))
     scheduler_task = asyncio.create_task(animepahe_service.animepahe_catalog_scheduler())

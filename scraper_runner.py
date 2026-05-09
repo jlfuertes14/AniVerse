@@ -75,6 +75,7 @@ ZYTE_API_KEY = os.environ.get("ZYTE_API_KEY")
 def _try_zyte_api(url, use_browser=True, actions=None):
     """Try to fetch data via Zyte API with browser rendering."""
     if not ZYTE_API_KEY:
+        log("[Zyte API] ZYTE_API_KEY not set. Skipping Zyte and using local fallback.")
         return None
     
     import requests
