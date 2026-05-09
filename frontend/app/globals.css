@@ -6954,3 +6954,9 @@ html[data-theme="light"] .profile-settings-note {
 .watch-community-load-more:hover svg {
   transform: translateY(2px);
 }
+
+/* Final override: remove the standalone next-episode CTA. */
+.watch-next-ep-btn,
+.watch-next-ep-desktop {
+  display: none !important;
+}
