@@ -26,8 +26,8 @@ router = APIRouter(prefix="/stream", tags=["streaming"])
 
 
 SOURCE_PRIORITY = {
-    "animepahe": 0,
-    "reanime": 1,
+    "reanime": 0,
+    "animepahe": 1,
 }
 
 
@@ -121,6 +121,7 @@ async def get_episode_stream(
         )
 
     animepahe_mapping = await get_animepahe_mapping(mal_id)
+    reanime_mapping = await db["provider_mappings"].find_one({"mal_id": mal_id, "provider": "reanime"})
 
     # 1. Check DB for available sources
     stream_candidates = await db["streams"].find(
@@ -201,9 +202,10 @@ async def get_episode_stream(
                     stream_data.get("source")
                 ),
                 referer_url=referer_url,
-                catalog_status=_build_catalog_status(animepahe_mapping, "animepahe")
-                if stream_data.get("source") == "animepahe"
-                else None,
+                catalog_status=_build_catalog_status(
+                    animepahe_mapping if stream_data.get("source") == "animepahe" else reanime_mapping, 
+                    stream_data.get("source", "unknown")
+                ),
             )
 
     # 2. If missing, trigger on-demand discovery
@@ -213,41 +215,66 @@ async def get_episode_stream(
             raise HTTPException(status_code=404, detail="Anime not found on MAL")
         
         search_title = anime.title_english or anime.title
-        # Skip AnimePahe checks if user explicitly preferred reanime
-        # If user prefers reanime, check if it's in progress or if we should skip AnimePahe
-        if prefer == "reanime":
-            print(f"[Streaming] User prefers reanime. Checking if AnimePahe is still working...")
-            mapping = animepahe_mapping
-            # If AnimePahe is currently refreshing, let's wait for it instead of 
-            # immediately triggering a backup discovery, as it might finish soon.
-            if is_animepahe_refresh_in_progress(mal_id):
-                print(f"[Streaming] AnimePahe refresh in progress. Waiting for it before trying Re:ANIME.")
-                available_episodes = int(mapping.get("latest_episode", 0)) if mapping else 0
-                pending_catalog_status = _build_catalog_status(mapping, "animepahe")
+
+        # --- Re:ANIME Discovery (Primary) ---
+        if prefer != "animepahe":
+            from backend.services.reanime_service import is_reanime_refresh_in_progress, refresh_reanime_catalog
+            
+            if is_reanime_refresh_in_progress(mal_id):
+                pending_catalog_status = _build_catalog_status(reanime_mapping, "reanime")
                 return JSONResponse(
                     status_code=202,
                     content={
-                        "detail": "AnimePahe stream is being fetched. Please refresh in a few seconds.",
+                        "detail": "Re:ANIME stream is being fetched. Please refresh in a few seconds.",
                         "mal_id": mal_id,
                         "ep_number": ep_number,
                         "status": "pending",
-                        "provider": "animepahe",
-                        "available_episodes": available_episodes,
+                        "provider": "reanime",
+                        "available_episodes": int(reanime_mapping.get("latest_episode", 0)) if reanime_mapping else 0,
                         "catalog_status": pending_catalog_status.model_dump() if pending_catalog_status else None,
                     }
                 )
-            
-            available_episodes = int(mapping.get("latest_episode", 0)) if mapping else 0
-            should_refresh = False
-        else:
-            # --- AnimePahe Discovery (Primary) ---
-            from backend.services.animepahe_service import should_refresh_animepahe_catalog
-            should_refresh, mapping = await should_refresh_animepahe_catalog(
-                mal_id, 
-                animepahe_requested_episode, 
-                expected_total=(anime.episodes or 0)
-            )
-            available_episodes = int(mapping.get("latest_episode", 0)) if mapping else 0
+
+            # Check if we recently tried and failed, to avoid infinite 202 loops
+            reanime_stale = True
+            if reanime_mapping and reanime_mapping.get("last_catalog_check_at"):
+                last_check = datetime.fromisoformat(reanime_mapping["last_catalog_check_at"].replace("Z", "+00:00"))
+                if datetime.now(timezone.utc) - last_check < timedelta(minutes=15):
+                    reanime_stale = False
+
+            if reanime_stale:
+                print(f"[Streaming] Queueing Re:ANIME discovery for {search_title}...")
+                background_tasks.add_task(
+                    refresh_reanime_catalog,
+                    mal_id,
+                    search_title,
+                    ep_number,
+                )
+                
+                pending_catalog_status = _build_catalog_status(reanime_mapping, "reanime")
+                return JSONResponse(
+                    status_code=202,
+                    content={
+                        "detail": "Re:ANIME stream is being fetched. Please refresh in a few seconds.",
+                        "mal_id": mal_id,
+                        "ep_number": ep_number,
+                        "status": "pending",
+                        "provider": "reanime",
+                        "available_episodes": int(reanime_mapping.get("latest_episode", 0)) if reanime_mapping else 0,
+                        "catalog_status": pending_catalog_status.model_dump() if pending_catalog_status else None,
+                    }
+                )
+            else:
+                print(f"[Streaming] Re:ANIME discovery recently checked and skipped. Falling back to AnimePahe...")
+
+        # --- AnimePahe Discovery (Fallback) ---
+        from backend.services.animepahe_service import should_refresh_animepahe_catalog
+        should_refresh, mapping = await should_refresh_animepahe_catalog(
+            mal_id, 
+            animepahe_requested_episode, 
+            expected_total=(anime.episodes or 0)
+        )
+        available_episodes = int(mapping.get("latest_episode", 0)) if mapping else 0
 
         if is_animepahe_refresh_in_progress(mal_id):
             pending_catalog_status = _build_catalog_status(mapping or animepahe_mapping, "animepahe")
@@ -264,7 +291,7 @@ async def get_episode_stream(
                 }
             )
 
-        if should_refresh and not prefer == "reanime":
+        if should_refresh:
             print(
                 f"[Streaming] Queueing AnimePahe discovery for {mal_id} Ep "
                 f"{animepahe_requested_episode} using title: {search_title}"
@@ -290,29 +317,9 @@ async def get_episode_stream(
                 }
             )
 
-        # --- Re:ANIME Discovery (Fallback) ---
-        print(f"[Streaming] AnimePahe discovery skipped/failed. Trying Re:ANIME fallback for {search_title}...")
-        reanime_slug = await search_reanime_by_title(search_title, mal_id)
-        if reanime_slug:
-            results = await scrape_reanime_episode(reanime_slug, mal_id, ep_number)
-            if results:
-                stream_data = results[0]
-                print(f"[Streaming] Discovered Re:ANIME stream for {mal_id} Ep {ep_number}")
-                return StreamResponse(
-                    mal_id=mal_id,
-                    ep_number=ep_number,
-                    stream_url=stream_data.get("stream_url"),
-                    embed_url=stream_data.get("embed_url"),
-                    subtitles=stream_data.get("subtitles", []),
-                    provider="reanime",
-                    available_episodes=await _get_latest_episode_number(db, mal_id, "reanime"),
-                    referer_url=stream_data.get("referer_url"),
-                    catalog_status=None
-                )
-        
         raise HTTPException(
             status_code=404,
-            detail=f"Episode {ep_number} is not available yet. Latest found on primary source: {available_episodes}"
+            detail=f"Episode {ep_number} is not available yet. Latest found on backup source: {available_episodes}"
         )
         
     except HTTPException:

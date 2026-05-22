@@ -49,7 +49,10 @@ export function LoadingToastProvider({ children }: { children: ReactNode }) {
 
     if (lastRouteRef.current !== routeKey) {
       lastRouteRef.current = routeKey;
-      hideLoading();
+      // Delay hiding the toast slightly to let the new page fully render and transition in
+      setTimeout(() => {
+        hideLoading();
+      }, 800);
     }
   }, [hideLoading, pathname, searchParams]);
 

@@ -12,6 +12,7 @@ interface PendingStreamState {
     isScraping: true;
     available_episodes?: number;
     catalog_status?: CatalogStatus;
+    provider?: string;
 }
 
 function isPendingStreamState(
@@ -39,6 +40,7 @@ async function getStreamData(
             isScraping: true,
             available_episodes: pendingData.available_episodes,
             catalog_status: pendingData.catalog_status,
+            provider: pendingData.provider,
         };
     }
     if (!res.ok) return null;
@@ -146,7 +148,7 @@ export default async function WatchPage({
                         episodeLabel={`Episode ${ep}`}
                         availableEpisodes={streamData.available_episodes}
                         catalogStatus={streamData.catalog_status}
-                        provider={preferProvider || "animepahe"}
+                        provider={streamData.provider || preferProvider || "animepahe"}
                     />
                 </main>
             </>

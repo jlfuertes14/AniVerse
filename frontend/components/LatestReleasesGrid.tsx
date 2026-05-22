@@ -142,7 +142,7 @@ export default function LatestReleasesGrid({ initialReleases }: LatestReleasesGr
                                 loadingMessage={`Loading ${rel.title}...`}
                             >
                                 <div className="latest-image-wrapper">
-                                    <img src={rel.snapshot} alt={rel.title} loading="lazy" />
+                                    <img src={rel.snapshot || "/placeholder.png"} alt={rel.title} loading="lazy" />
                                     <div className="latest-card-overlay">
                                         <div className="latest-header-row">
                                             <p className="latest-title">{rel.title}</p>
@@ -154,7 +154,7 @@ export default function LatestReleasesGrid({ initialReleases }: LatestReleasesGr
                         ) : (
                             <div className="latest-card disabled">
                                 <div className="latest-image-wrapper">
-                                    <img src={rel.snapshot} alt={rel.title} loading="lazy" />
+                                    <img src={rel.snapshot || "/placeholder.png"} alt={rel.title} loading="lazy" />
                                     <div className="latest-card-overlay">
                                         <div className="latest-header-row">
                                             <p className="latest-title">{rel.title}</p>

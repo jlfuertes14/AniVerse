@@ -86,10 +86,8 @@ export default function StreamPendingRefresher({
                 !hasTriggeredFallback &&
                 getElapsedSeconds() >= fallbackAfterSeconds
             ) {
-                const params = new URLSearchParams(searchParams.toString());
-                params.set("prefer", "reanime");
-                setHasTriggeredFallback(true);
-                router.replace(`${pathname}?${params.toString()}`);
+                // AnimePahe fallback also timed out — nothing more to try
+                // Keep polling; the background task may still finish
             }
         }, 1000);
 
@@ -140,12 +138,12 @@ export default function StreamPendingRefresher({
             <div className="stream-pending-copy">
                 <div className="stream-pending-kicker">
                     <span className="stream-pending-dot" />
-                    {provider === "animepahe" ? "Connecting to primary stream server" : "Connecting to backup stream server"}
+                    {provider === "animepahe" ? "Connecting to backup stream server" : "Connecting to primary stream server"}
                 </div>
                 <h2 className="stream-pending-title">{title}</h2>
                 <p className="stream-pending-episode">{episodeLabel}</p>
                 <p className="stream-pending-text">
-                    We&apos;re getting this episode ready for playback. If the primary source takes too long, we&apos;ll try another server automatically.
+                    We&apos;re getting this episode ready for playback. Re:ANIME was unavailable, so we&apos;re trying AnimePahe as a backup.
                 </p>
 
                 <div className="stream-pending-stats">
@@ -155,7 +153,7 @@ export default function StreamPendingRefresher({
                     </div>
                     <div className="stream-pending-stat">
                         <span className="stream-pending-stat-label">Now doing</span>
-                        <strong>{provider === "animepahe" ? "Checking primary source" : "Trying backup source"}</strong>
+                        <strong>{provider === "animepahe" ? "Scraping backup source (AnimePahe)" : "Checking Re:ANIME"}</strong>
                     </div>
                     <div className="stream-pending-stat">
                         <span className="stream-pending-stat-label">Episodes found</span>
@@ -186,7 +184,7 @@ export default function StreamPendingRefresher({
 
                 <p className="stream-pending-hint">
                     We check again every {pollIntervalSeconds}s in the background and will load the player as soon as the stream is ready.
-                    {provider === "animepahe" ? ` If this takes more than ${fallbackAfterSeconds}s, we switch to Re:ANIME automatically.` : ""}
+                    {provider === "animepahe" ? " AnimePahe may take longer due to Cloudflare protection." : ""}
                 </p>
             </div>
         </section>

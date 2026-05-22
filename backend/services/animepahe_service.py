@@ -741,6 +741,38 @@ async def animepahe_catalog_scheduler():
         await asyncio.sleep(SCHEDULER_REFRESH_INTERVAL_SECONDS)
 
 
+async def refresh_trending_animepahe_catalogs():
+    """Background sweep to keep trending catalogs warm."""
+    try:
+        from backend.services.anilist_service import get_trending
+        # Fetch top 2 pages of trending (~50 anime)
+        for page in [1, 2]:
+            result = await get_trending(page=page)
+            data = result.get("data", [])
+            for item in data:
+                mal_id = item.get("mal_id") or item.get("id")
+                title = item.get("title")
+                if not mal_id or not title or is_animepahe_refresh_in_progress(mal_id):
+                    continue
+                try:
+                    await refresh_animepahe_catalog(mal_id, title, preferred_episode=1, resolve_stream=False)
+                    # Sleep slightly to avoid hammering Jikan and scrapers
+                    await asyncio.sleep(2)
+                except Exception as e:
+                    print(f"[AnimePahe Service] Trending scheduled refresh failed for {mal_id}: {e}")
+    except Exception as e:
+        print(f"[AnimePahe Service] Trending sweep error: {e}")
+
+async def trending_catalog_scheduler():
+    """Periodically refresh trending AnimePahe mappings (every 1 hour)."""
+    while True:
+        try:
+            await refresh_trending_animepahe_catalogs()
+        except Exception as e:
+            print(f"[AnimePahe Service] Trending scheduler loop error: {e}")
+        # Run every 1 hour (3600 seconds)
+        await asyncio.sleep(3600)
+
 async def _map_single_release(item: dict) -> dict:
     """Helper to map a single release item to a MAL ID with persistent caching."""
     db = get_db()

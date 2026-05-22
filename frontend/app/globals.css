@@ -14,6 +14,7 @@
   --bg-overlay: rgba(0, 0, 0, 0.8);
 
   --gold: #d4a843;
+  --gold-hover: #e5bd58;
   --gold-dim: #b08930;
   --gold-glow: rgba(212, 168, 67, 0.3);
   --green-cta: #3db67a;
@@ -56,6 +57,7 @@ html[data-theme="light"] {
   --bg-overlay: rgba(0, 0, 0, 0.1);
 
   --gold: #b47b10;
+  --gold-hover: #c98e17;
   --gold-dim: #94630a;
   --gold-glow: rgba(184, 131, 22, 0.1);
   --green-cta: #2f8f63;

@@ -19,6 +19,18 @@ MAPPING_LOOKUP_CONCURRENCY = 2
 # Path to the scraper runner script
 SCRAPER_RUNNER = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "scraper_runner.py")
 
+_active_refreshes: set[int] = set()
+_refresh_locks: dict[int, asyncio.Lock] = {}
+
+def is_reanime_refresh_in_progress(mal_id: int) -> bool:
+    return mal_id in _active_refreshes
+
+def _get_refresh_lock(mal_id: int) -> asyncio.Lock:
+    lock = _refresh_locks.get(mal_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _refresh_locks[mal_id] = lock
+    return lock
 
 def _expand_title_candidates(title: str | None) -> list[str]:
     if not title:
@@ -84,6 +96,41 @@ async def _build_reanime_title_candidates(mal_id: int | None, fallback_title: st
 
     return candidates
 
+async def refresh_reanime_catalog(mal_id: int, title: str, ep_number: int):
+    """
+    Background discovery for Re:ANIME.
+    Updates DB mapping state while discovery is running.
+    """
+    lock = _get_refresh_lock(mal_id)
+    if lock.locked():
+        print(f"[Re:ANIME] Discovery already running for {mal_id}")
+        return
+
+    async with lock:
+        _active_refreshes.add(mal_id)
+        db = get_db()
+        try:
+            await db["provider_mappings"].update_one(
+                {"mal_id": mal_id, "provider": "reanime"},
+                {"$set": {"refreshing": True, "refresh_started_at": datetime.now(timezone.utc).isoformat()}},
+                upsert=True
+            )
+            reanime_slug = await search_reanime_by_title(title, mal_id)
+            if reanime_slug:
+                await scrape_reanime_episode(reanime_slug, mal_id, ep_number)
+        except Exception as e:
+            print(f"[Re:ANIME] Background discovery failed for {mal_id}: {e}")
+        finally:
+            _active_refreshes.discard(mal_id)
+            await db["provider_mappings"].update_one(
+                {"mal_id": mal_id, "provider": "reanime"},
+                {"$set": {
+                    "refreshing": False, 
+                    "last_catalog_check_at": datetime.now(timezone.utc).isoformat()
+                }, "$unset": {"refresh_started_at": ""}},
+                upsert=True
+            )
+
 async def search_reanime_by_title(title: str, mal_id: int = None):
     """
     Searches Re:ANIME for an anime by its title and returns the slug.
@@ -94,7 +141,7 @@ async def search_reanime_by_title(title: str, mal_id: int = None):
     # Check cache first
     if mal_id:
         cached = await db["provider_mappings"].find_one({"mal_id": mal_id, "provider": "reanime"})
-        if cached:
+        if cached and "slug" in cached:
             return cached["slug"]
 
     target_anilist_id = None

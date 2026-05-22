@@ -31,12 +31,14 @@ async def lifespan(app: FastAPI):
     recommendation_task = asyncio.create_task(recommendation_engine.build_model(count=200))
     scheduler_task = asyncio.create_task(animepahe_service.animepahe_catalog_scheduler())
     animepahe_latest_releases_task = asyncio.create_task(animepahe_service.latest_releases_scheduler())
+    animepahe_trending_task = asyncio.create_task(animepahe_service.trending_catalog_scheduler())
     reanime_latest_releases_task = asyncio.create_task(reanime_service.latest_releases_scheduler())
     schedule_task = asyncio.create_task(schedule_service.schedule_scheduler())
     yield
     recommendation_task.cancel()
     scheduler_task.cancel()
     animepahe_latest_releases_task.cancel()
+    animepahe_trending_task.cancel()
     reanime_latest_releases_task.cancel()
     schedule_task.cancel()
     print("[AI] Shutting down.")
@@ -100,4 +102,3 @@ async def health():
         "status": "healthy",
         "ai_ready": recommendation_engine.is_ready(),
     }
-

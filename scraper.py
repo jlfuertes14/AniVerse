@@ -46,56 +46,194 @@ def _log(msg: str):
     else:
         print(msg)
 
-# ── Zyte API Integration (Turbo Mode) ──────────────────────────
+# ── API Scraper Integrations (Rotational Fallback) ──────────────────────────
 ZYTE_API_KEY = os.environ.get("ZYTE_API_KEY")
+SCRAPER_API_KEY = os.environ.get("SCRAPER_API_KEY")
+SCRAPINGANT_API_KEY = os.environ.get("SCRAPINGANT_API_KEY")
+WEBSCRAPING_AI_KEY = os.environ.get("WEBSCRAPING_AI_KEY")
 
-def _try_zyte_api(url, use_browser=True):
-    """Try to fetch data via Zyte API. Returns JSON data if it's an API call, or HTML if not."""
-    if not ZYTE_API_KEY:
-        return None
-    
+class APILimitReached(Exception):
+    pass
+
+def _extract_json_from_html(html, use_browser):
+    if use_browser and isinstance(html, str) and ("{" in html and "}" in html):
+        import json, re
+        match = re.search(r'\{.*\}', html, re.DOTALL)
+        if match:
+            try:
+                parsed = json.loads(match.group())
+                return parsed
+            except Exception:
+                pass
+    return html
+
+def _is_cloudflare_blocked(html) -> bool:
+    if not isinstance(html, str):
+        return False
+    # Check for common Cloudflare / DDoS-Guard challenge indicators
+    html_lower = html.lower()
+    return "just a moment..." in html_lower or "cf-browser-verification" in html_lower or "ddos-guard" in html_lower
+
+def _try_scraper_api(url, use_browser=True, sapi_instructions=None, wait_for_selector=None):
+    if not SCRAPER_API_KEY: return None
     import requests
-    try:
-        _log(f"[Zyte API] Turbo-fetching: {url}")
-        payload = {
-            "url": url,
-            "browserHtml": use_browser
-        }
-        response = requests.post(
-            "https://api.zyte.com/v1/extract",
-            auth=(ZYTE_API_KEY, ""),
-            json=payload,
-            timeout=30
-        )
-        # If we hit 429 (Too many requests) or 402 (Payment Required), trigger fallback
-        if response.status_code in [429, 402, 401]:
-            _log(f"[Zyte API] API Limit/Error ({response.status_code}). Falling back to Local Playwright...")
-            return None
-            
-        response.raise_for_status()
-        try:
-            data = response.json()
-        except (ValueError, Exception) as je:
-            _log(f"[Zyte API] Error: {je}. Falling back...")
-            return None
+    _log(f"[ScraperAPI] Fetching: {url}")
+    params = {"api_key": SCRAPER_API_KEY, "url": url, "premium": "true"}
+    if use_browser: params["render"] = "true"
+    if wait_for_selector: params["wait_for_selector"] = wait_for_selector
+    
+    headers = {}
+    if sapi_instructions:
+        import json
+        headers["x-sapi-render-js-instructions"] = json.dumps(sapi_instructions)
         
-        # If it's a browserHtml request, we might need to extract JSON from the HTML wrapper
+    try:
+        response = requests.get("http://api.scraperapi.com", params=params, headers=headers, timeout=60)
+        if response.status_code in [401, 402, 403, 429]:
+            _log(f"[ScraperAPI] Limit/Auth Error ({response.status_code}). Exhausted.")
+            raise APILimitReached("ScraperAPI Exhausted")
+        response.raise_for_status()
+        html = response.text
+        if _is_cloudflare_blocked(html):
+            _log("[ScraperAPI] Cloudflare/DDoS-Guard block detected. Treating as failure.")
+            return None
+        return _extract_json_from_html(html, use_browser)
+    except APILimitReached:
+        raise
+    except Exception as e:
+        _log(f"[ScraperAPI] Error: {e}")
+        return None
+
+def _try_scrapingant_api(url, use_browser=True, wait_for_selector=None):
+    if not SCRAPINGANT_API_KEY: return None
+    import requests
+    _log(f"[ScrapingAnt] Fetching: {url}")
+    params = {
+        "url": url, 
+        "browser": "true" if use_browser else "false",
+        "proxy_type": "residential",
+        "x-api-key": SCRAPINGANT_API_KEY
+    }
+    if wait_for_selector: params["wait_for_selector"] = wait_for_selector
+    
+    try:
+        response = requests.get("https://api.scrapingant.com/v2/general", params=params, timeout=60)
+        if response.status_code in [401, 402, 403, 429]:
+            _log(f"[ScrapingAnt] Limit/Auth Error ({response.status_code}). Exhausted.")
+            raise APILimitReached("ScrapingAnt Exhausted")
+        response.raise_for_status()
+        html = response.text
+        if _is_cloudflare_blocked(html):
+            _log("[ScrapingAnt] Cloudflare/DDoS-Guard block detected. Treating as failure.")
+            return None
+        return _extract_json_from_html(html, use_browser)
+    except APILimitReached:
+        raise
+    except Exception as e:
+        _log(f"[ScrapingAnt] Error: {e}")
+        return None
+
+def _try_webscraping_ai(url, use_browser=True):
+    if not WEBSCRAPING_AI_KEY: return None
+    import requests
+    _log(f"[WebScraping.AI] Fetching: {url}")
+    params = {"api_key": WEBSCRAPING_AI_KEY, "url": url, "proxy": "residential"}
+    if use_browser: params["js"] = "true"
+    
+    try:
+        response = requests.get("https://api.webscraping.ai/html", params=params, timeout=60)
+        if response.status_code in [401, 402, 403, 429]:
+            _log(f"[WebScraping.AI] Limit/Auth Error ({response.status_code}). Exhausted.")
+            raise APILimitReached("WebScraping.AI Exhausted")
+        response.raise_for_status()
+        html = response.text
+        if _is_cloudflare_blocked(html):
+            _log("[WebScraping.AI] Cloudflare/DDoS-Guard block detected. Treating as failure.")
+            return None
+        return _extract_json_from_html(html, use_browser)
+    except APILimitReached:
+        raise
+    except Exception as e:
+        _log(f"[WebScraping.AI] Error: {e}")
+        return None
+
+def _try_zyte_api(url, use_browser=True, zyte_actions=None):
+    if not ZYTE_API_KEY: return None
+    import requests
+    _log(f"[Zyte API] Fetching: {url}")
+    payload = {"url": url, "browserHtml": use_browser}
+    if zyte_actions: payload["actions"] = zyte_actions
+        
+    try:
+        response = requests.post("https://api.zyte.com/v1/extract", auth=(ZYTE_API_KEY, ""), json=payload, timeout=60)
+        if response.status_code in [401, 402, 403, 429]:
+            _log(f"[Zyte API] Limit/Auth Error ({response.status_code}). Exhausted.")
+            raise APILimitReached("Zyte API Exhausted")
+        response.raise_for_status()
+        data = response.json()
         if use_browser:
             html = data.get("browserHtml", "")
-            if "{" in html and "}" in html:
-                import json
-                import re
-                match = re.search(r'\{.*\}', html, re.DOTALL)
-                if match:
-                    try:
-                        return json.loads(match.group())
-                    except (ValueError, Exception):
-                        return html
-            return html
+            if _is_cloudflare_blocked(html):
+                _log("[Zyte API] Cloudflare/DDoS-Guard block detected. Treating as failure.")
+                return None
+            return _extract_json_from_html(html, use_browser)
         return data
+    except APILimitReached:
+        raise
     except Exception as e:
-        _log(f"[Zyte API] Error: {e}. Falling back...")
+        _log(f"[Zyte API] Error: {e}")
         return None
+
+def _fetch_with_api_fallback(url, use_browser=True, zyte_actions=None, sapi_instructions=None, wait_for_selector=None):
+    """
+    Rotational API fetcher.
+    Priority: ScraperAPI -> ScrapingAnt -> WebScraping.AI -> Zyte API -> None (Local Playwright)
+    """
+    html = None
+    is_animepahe = "animepahe" in url or "kwik" in url
+    
+    if is_animepahe:
+        _log("[API Status] AnimePahe/Kwik URL detected — skipping ScraperAPI/ScrapingAnt/WebScraping.AI, going straight to Zyte or Local Playwright")
+    
+    if not is_animepahe:
+        # 1. ScraperAPI
+        try:
+            html = _try_scraper_api(url, use_browser, sapi_instructions, wait_for_selector)
+            if html:
+                _log("[API Status] Successfully fetched via ScraperAPI")
+                return html
+        except APILimitReached:
+            pass
+            
+        # 2. ScrapingAnt
+        try:
+            html = _try_scrapingant_api(url, use_browser, wait_for_selector)
+            if html:
+                _log("[API Status] Successfully fetched via ScrapingAnt")
+                return html
+        except APILimitReached:
+            pass
+            
+        # 3. WebScraping.AI
+        try:
+            html = _try_webscraping_ai(url, use_browser)
+            if html:
+                _log("[API Status] Successfully fetched via WebScraping.AI")
+                return html
+        except APILimitReached:
+            pass
+        
+    # 4. Zyte API
+    try:
+        html = _try_zyte_api(url, use_browser, zyte_actions)
+        if html:
+            _log("[API Status] Successfully fetched via Zyte API")
+            return html
+    except APILimitReached:
+        pass
+        
+    _log("[API Status] All APIs exhausted or failed. Falling back to local Playwright...")
+    return None
 
 
 
@@ -172,9 +310,9 @@ async def animepahe_search(title: str) -> dict | None:
 
     # 1. Try Zyte API (Turbo)
     api_url = f"{ANIMEPAHE_BASE}/api?m=search&q={title}"
-    zyte_data = _try_zyte_api(api_url, use_browser=True)
+    zyte_data = _fetch_with_api_fallback(api_url, use_browser=True)
     
-    if zyte_data and isinstance(zyte_data, dict) and zyte_data.get("data"):
+    if zyte_data and isinstance(zyte_data, dict) and "data" in zyte_data:
         results = zyte_data["data"]
         best_match = results[0]
         search_title_lower = title.lower()
@@ -284,9 +422,9 @@ async def animepahe_get_episodes(session: str, max_pages: int = 100, target_epis
         _log(f"[AnimePahe][Zyte] Calculating target page for Ep {target_episode} -> Page {target_page}")
 
     api_url = f"{ANIMEPAHE_BASE}/api?m=release&id={session}&sort=episode_asc&page={target_page}"
-    zyte_data = _try_zyte_api(api_url, use_browser=True)
+    zyte_data = _fetch_with_api_fallback(api_url, use_browser=True)
     
-    if zyte_data and isinstance(zyte_data, dict) and zyte_data.get("data"):
+    if zyte_data and isinstance(zyte_data, dict) and "data" in zyte_data:
         _log(f"[AnimePahe][Zyte] Successfully fetched episode data (Page {target_page})")
         all_episodes = zyte_data.get("data", [])
         
@@ -298,8 +436,8 @@ async def animepahe_get_episodes(session: str, max_pages: int = 100, target_epis
                 max_zyte_pages = min(last_page, 3)
                 for pg in range(2, max_zyte_pages + 1):
                     pg_url = f"{ANIMEPAHE_BASE}/api?m=release&id={session}&sort=episode_asc&page={pg}"
-                    pg_data = _try_zyte_api(pg_url, use_browser=True)
-                    if pg_data and isinstance(pg_data, dict) and pg_data.get("data"):
+                    pg_data = _fetch_with_api_fallback(pg_url, use_browser=True)
+                    if pg_data and isinstance(pg_data, dict) and "data" in pg_data:
                         all_episodes.extend(pg_data["data"])
                         _log(f"[AnimePahe][Zyte] Fetched additional page {pg}")
         
@@ -385,7 +523,7 @@ async def animepahe_get_stream(session: str, episode_session: str) -> dict | Non
     _log(f"[AnimePahe] Resolving stream: {play_url}")
 
     # 1. Try Zyte API (Turbo)
-    html = _try_zyte_api(play_url, use_browser=True)
+    html = _fetch_with_api_fallback(play_url, use_browser=True)
     if html:
         kwik_matches = re.findall(r'https://kwik\.[a-z]+/e/[a-zA-Z0-9]+', html)
         if kwik_matches:
@@ -609,9 +747,9 @@ async def scrape_animepahe_latest(pages: int = 3) -> list:
     # 1. Try Zyte API (Turbo)
     # We'll just fetch the first page via Zyte to see if it works
     api_url = f"{ANIMEPAHE_BASE}/api?m=airing&page=1"
-    zyte_data = _try_zyte_api(api_url, use_browser=True)
+    zyte_data = _fetch_with_api_fallback(api_url, use_browser=True)
     
-    if zyte_data and isinstance(zyte_data, dict) and zyte_data.get("data"):
+    if zyte_data and isinstance(zyte_data, dict) and "data" in zyte_data:
         _log(f"[AnimePahe][Zyte] Successfully fetched latest releases")
         return zyte_data.get("data", [])
 
@@ -699,7 +837,7 @@ async def scrape_reanime_latest() -> list:
     # 1. Try Zyte API (Turbo)
     # Re:ANIME usually has a JSON endpoint for latest releases if we look close, 
     # but for now we'll use browserHtml on the homepage.
-    html = _try_zyte_api("https://reanime.to/")
+    html = _fetch_with_api_fallback("https://reanime.to/")
     if html:
         from bs4 import BeautifulSoup
         soup = BeautifulSoup(html, 'html.parser')
@@ -895,7 +1033,7 @@ async def scrape_anime_schedule():
     _log("[Schedule] Starting hybrid scraper for animeschedule.net")
     
     # 1. Try Zyte API (Turbo)
-    html = _try_zyte_api("https://animeschedule.net/")
+    html = _fetch_with_api_fallback("https://animeschedule.net/")
     if html:
         from bs4 import BeautifulSoup
         soup = BeautifulSoup(html, 'html.parser')

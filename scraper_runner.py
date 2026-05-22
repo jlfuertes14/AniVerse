@@ -69,49 +69,197 @@ def log(msg: str):
     print(msg, file=sys.stderr)
 
 
-# ── Zyte API Integration (Turbo Mode) ──────────────────────────
+# ── API Scraper Integrations (Rotational Fallback) ──────────────────────────
 ZYTE_API_KEY = os.environ.get("ZYTE_API_KEY")
+SCRAPER_API_KEY = os.environ.get("SCRAPER_API_KEY")
+SCRAPINGANT_API_KEY = os.environ.get("SCRAPINGANT_API_KEY")
+WEBSCRAPING_AI_KEY = os.environ.get("WEBSCRAPING_AI_KEY")
 
-def _try_zyte_api(url, use_browser=True, actions=None):
-    """Try to fetch data via Zyte API with browser rendering."""
-    if not ZYTE_API_KEY:
-        log("[Zyte API] ZYTE_API_KEY not set. Skipping Zyte and using local fallback.")
-        return None
-    
+class APILimitReached(Exception):
+    pass
+
+def _extract_json_from_html(html, use_browser):
+    if use_browser and ("{" in html and "}" in html):
+        import json, re
+        match = re.search(r'\{.*\}', html, re.DOTALL)
+        if match:
+            try:
+                json.loads(match.group())
+                return match.group()
+            except Exception:
+                pass
+    return html
+
+def _is_cloudflare_blocked(html) -> bool:
+    if not isinstance(html, str):
+        return False
+    # Check for common Cloudflare / DDoS-Guard challenge indicators
+    html_lower = html.lower()
+    return "just a moment..." in html_lower or "cf-browser-verification" in html_lower or "ddos-guard" in html_lower
+
+def _try_scraper_api(url, use_browser=True, sapi_instructions=None, wait_for_selector=None):
+    if not SCRAPER_API_KEY: return None
     import requests
-    try:
-        log(f"[Zyte API] Turbo-fetching: {url}")
-        payload = {
-            "url": url,
-            "browserHtml": use_browser
-        }
-        if actions:
-            payload["actions"] = actions
-            
-        response = requests.post(
-            "https://api.zyte.com/v1/extract",
-            auth=(ZYTE_API_KEY, ""),
-            json=payload,
-            timeout=45
-        )
-        if response.status_code in [429, 402, 401]:
-            log(f"[Zyte API] API Limit/Error ({response.status_code}). Falling back to Local Playwright...")
-            return None
+    log(f"[ScraperAPI] Fetching: {url}")
+    params = {"api_key": SCRAPER_API_KEY, "url": url, "premium": "true"}
+    if use_browser: params["render"] = "true"
+    if wait_for_selector: params["wait_for_selector"] = wait_for_selector
+    
+    headers = {}
+    if sapi_instructions:
+        import json
+        headers["x-sapi-render-js-instructions"] = json.dumps(sapi_instructions)
         
-        if response.status_code >= 400:
-            log(f"[Zyte API] Error {response.status_code}: {response.text}")
-            return None
-            
+    try:
+        response = requests.get("http://api.scraperapi.com", params=params, headers=headers, timeout=60)
+        if response.status_code in [401, 402, 403, 429]:
+            log(f"[ScraperAPI] Limit/Auth Error ({response.status_code}). Exhausted.")
+            raise APILimitReached("ScraperAPI Exhausted")
         response.raise_for_status()
-        try:
-            data = response.json()
-        except (json.JSONDecodeError, ValueError) as je:
-            log(f"[Zyte API] Error: {je}. Falling back...")
+        html = response.text
+        if _is_cloudflare_blocked(html):
+            log("[ScraperAPI] Cloudflare/DDoS-Guard block detected. Treating as failure.")
             return None
-        return data.get("browserHtml", "")
+        return _extract_json_from_html(html, use_browser)
+    except APILimitReached:
+        raise
     except Exception as e:
-        log(f"[Zyte API] Exception: {e}. Falling back...")
+        log(f"[ScraperAPI] Error: {e}")
         return None
+
+def _try_scrapingant_api(url, use_browser=True, wait_for_selector=None):
+    if not SCRAPINGANT_API_KEY: return None
+    import requests
+    log(f"[ScrapingAnt] Fetching: {url}")
+    params = {
+        "url": url, 
+        "browser": "true" if use_browser else "false",
+        "proxy_type": "residential",
+        "x-api-key": SCRAPINGANT_API_KEY
+    }
+    if wait_for_selector: params["wait_for_selector"] = wait_for_selector
+    
+    try:
+        response = requests.get("https://api.scrapingant.com/v2/general", params=params, timeout=60)
+        if response.status_code in [401, 402, 403, 429]:
+            log(f"[ScrapingAnt] Limit/Auth Error ({response.status_code}). Exhausted.")
+            raise APILimitReached("ScrapingAnt Exhausted")
+        response.raise_for_status()
+        html = response.text
+        if _is_cloudflare_blocked(html):
+            log("[ScrapingAnt] Cloudflare/DDoS-Guard block detected. Treating as failure.")
+            return None
+        return _extract_json_from_html(html, use_browser)
+    except APILimitReached:
+        raise
+    except Exception as e:
+        log(f"[ScrapingAnt] Error: {e}")
+        return None
+
+def _try_webscraping_ai(url, use_browser=True, js_snippet=None, timeout_ms=None):
+    if not WEBSCRAPING_AI_KEY: return None
+    import requests
+    log(f"[WebScraping.AI] Fetching: {url}")
+    params = {"api_key": WEBSCRAPING_AI_KEY, "url": url, "proxy": "residential"}
+    if use_browser: params["js"] = "true"
+    if js_snippet: params["js_snippet"] = js_snippet
+    if timeout_ms: params["timeout"] = str(timeout_ms)
+    
+    try:
+        response = requests.get("https://api.webscraping.ai/html", params=params, timeout=90)
+        if response.status_code in [401, 402, 403, 429]:
+            log(f"[WebScraping.AI] Limit/Auth Error ({response.status_code}). Exhausted.")
+            raise APILimitReached("WebScraping.AI Exhausted")
+        response.raise_for_status()
+        html = response.text
+        if _is_cloudflare_blocked(html):
+            log("[WebScraping.AI] Cloudflare/DDoS-Guard block detected. Treating as failure.")
+            return None
+        return _extract_json_from_html(html, use_browser)
+    except APILimitReached:
+        raise
+    except Exception as e:
+        log(f"[WebScraping.AI] Error: {e}")
+        return None
+
+def _try_zyte_api(url, use_browser=True, zyte_actions=None):
+    if not ZYTE_API_KEY: return None
+    import requests
+    log(f"[Zyte API] Fetching: {url}")
+    payload = {"url": url, "browserHtml": use_browser}
+    if zyte_actions: payload["actions"] = zyte_actions
+        
+    try:
+        response = requests.post("https://api.zyte.com/v1/extract", auth=(ZYTE_API_KEY, ""), json=payload, timeout=60)
+        if response.status_code in [401, 402, 403, 429]:
+            log(f"[Zyte API] Limit/Auth Error ({response.status_code}). Exhausted.")
+            raise APILimitReached("Zyte API Exhausted")
+        data = response.json()
+        if use_browser:
+            html = data.get("browserHtml", "")
+            if _is_cloudflare_blocked(html):
+                log("[Zyte API] Cloudflare/DDoS-Guard block detected. Treating as failure.")
+                return None
+            return _extract_json_from_html(html, use_browser)
+    except APILimitReached:
+        raise
+    except Exception as e:
+        log(f"[Zyte API] Error: {e}")
+        return None
+
+def _fetch_with_api_fallback(url, use_browser=True, zyte_actions=None, sapi_instructions=None, wait_for_selector=None):
+    """
+    Rotational API fetcher.
+    Priority: ScraperAPI -> ScrapingAnt -> WebScraping.AI -> Zyte API -> None (Local Playwright)
+    
+    For AnimePahe URLs, skip straight to Zyte API (ScraperAPI/ScrapingAnt/WebScraping.AI
+    always fail with 500/423 on AnimePahe's Cloudflare, wasting credits and time).
+    """
+    html = None
+    is_animepahe = "animepahe" in url or "kwik" in url
+    
+    if is_animepahe:
+        log("[API Status] AnimePahe/Kwik URL detected — skipping ScraperAPI/ScrapingAnt/WebScraping.AI, going straight to Zyte or Local Playwright")
+    
+    if not is_animepahe:
+        # 1. ScraperAPI
+        try:
+            html = _try_scraper_api(url, use_browser, sapi_instructions, wait_for_selector)
+            if html:
+                log("[API Status] Successfully fetched via ScraperAPI")
+                return html
+        except APILimitReached:
+            pass
+            
+        # 2. ScrapingAnt
+        try:
+            html = _try_scrapingant_api(url, use_browser, wait_for_selector)
+            if html:
+                log("[API Status] Successfully fetched via ScrapingAnt")
+                return html
+        except APILimitReached:
+            pass
+            
+        # 3. WebScraping.AI
+        try:
+            html = _try_webscraping_ai(url, use_browser)
+            if html:
+                log("[API Status] Successfully fetched via WebScraping.AI")
+                return html
+        except APILimitReached:
+            pass
+        
+    # 4. Zyte API (only API that works for AnimePahe)
+    try:
+        html = _try_zyte_api(url, use_browser, zyte_actions)
+        if html:
+            log("[API Status] Successfully fetched via Zyte API")
+            return html
+    except APILimitReached:
+        pass
+        
+    log("[API Status] All APIs exhausted or failed. Falling back to local Playwright...")
+    return None
 
 
 def _normalize_title(value: str | None) -> str:
@@ -168,14 +316,14 @@ async def reanime_search(title: str, target_anilist_id: int = None) -> dict | No
             log(f"[Re:ANIME][Cache] Hit: {cached.get('title')} (slug: {cached.get('slug')})")
             return {"slug": cached["slug"], "anilist_id": cached.get("mal_id")}
 
-    # 1. Try Zyte API (Turbo)
-    # Re:ANIME search is dynamic, but we can try to render it with a simple wait
-    html = _try_zyte_api("https://reanime.to/", actions=[
-        {"action": "waitForSelector", "selector": {"type": "css", "value": "input[placeholder*='Search']"}, "timeout": 5},
-        {"action": "type", "selector": {"type": "css", "value": "input[placeholder*='Search']"}, "text": title},
-        {"action": "click", "selector": {"type": "css", "value": "button:has-text('Search')"}, "onError": "ignore"}, # Click search if button exists
-        {"action": "waitForSelector", "selector": {"type": "css", "value": "a[href*='/anime/']"}, "timeout": 10}
-    ])
+    # 1. Try Rotational API Fallback (Turbo)
+    # Using direct search URL so APIs don't need to simulate typing
+    search_url = f"https://reanime.to/search?q={quote_plus(title)}"
+    html = _fetch_with_api_fallback(
+        search_url, 
+        use_browser=True, 
+        wait_for_selector="a[href*='/anime/']"
+    )
     
     if html:
         log(f"[Re:ANIME][Zyte] Parsing search results...")
@@ -216,21 +364,8 @@ async def reanime_search(title: str, target_anilist_id: int = None) -> dict | No
         )
         page = await context.new_page()
         try:
-            await page.goto("https://reanime.to/", wait_until="domcontentloaded", timeout=30000)
-
-            # Try to find any search trigger
-            try:
-                await page.click("button:has-text('Search')", timeout=5000)
-            except:
-                # Fallback: try to find the input directly if it's already there
-                pass
-
-            # Type query with delay
-            search_input = "input[placeholder*='Search']"
-            await page.wait_for_selector(search_input, timeout=10000)
-            await page.click(search_input)
-            await page.keyboard.type(title, delay=100)
-            await page.keyboard.press("Enter")
+            search_url = f"https://reanime.to/search?q={quote_plus(title)}"
+            await page.goto(search_url, wait_until="domcontentloaded", timeout=30000)
 
             # Wait for results
             await page.wait_for_timeout(3000)
@@ -301,38 +436,84 @@ async def reanime_scrape_episode(slug: str, episode_number: int) -> dict | None:
                 "available_episodes": cached.get("available_episodes", episode_number)
             }
 
-    # 1. Try Zyte API (Turbo)
-    # We wait for the iframe to have a real src (not just about:blank)
-    html = _try_zyte_api(watch_url, actions=[
-        {"action": "waitForSelector", "selector": {"type": "css", "value": "iframe#video-player"}, "timeout": 15},
-    ])
+    # Helper to count episodes from parsed HTML
+    def _count_episodes_from_soup(soup):
+        ep_elements = soup.select("a[data-episode]")
+        if ep_elements:
+            try:
+                ep_nums = [int(el.get("data-episode")) for el in ep_elements if el.get("data-episode", "").isdigit()]
+                if ep_nums: return max(ep_nums)
+            except: pass
+        return 1
+
+    # 1. Try WebScraping.AI with JS snippet (most reliable for ReAnime)
+    # This executes JavaScript ON the proxy server to wait for the iframe
+    # to be dynamically injected by ReAnime's player loader.
+    if WEBSCRAPING_AI_KEY:
+        log(f"[Re:ANIME][WebScraping.AI+JS] Trying JS snippet extraction...")
+        js_wait_snippet = """
+            // Wait up to 40s for the video player iframe to get a valid src
+            await new Promise((resolve) => {
+                let elapsed = 0;
+                const interval = setInterval(() => {
+                    const ifr = document.querySelector('iframe#video-player') || document.querySelector('iframe[src*="flixcloud"]');
+                    if (ifr && ifr.src && ifr.src.includes('flixcloud')) {
+                        clearInterval(interval);
+                        resolve();
+                    }
+                    elapsed += 500;
+                    if (elapsed >= 40000) {
+                        clearInterval(interval);
+                        resolve();
+                    }
+                }, 500);
+            });
+        """
+        try:
+            html = _try_webscraping_ai(watch_url, use_browser=True, js_snippet=js_wait_snippet, timeout_ms=60000)
+            if html:
+                soup = BeautifulSoup(html, 'html.parser')
+                iframe = soup.select_one("iframe#video-player, iframe[src*='flixcloud']")
+                embed_url = iframe.get("src") if iframe else None
+                
+                if embed_url and "flixcloud" in embed_url:
+                    log(f"[Re:ANIME][WebScraping.AI+JS] Found FlixCloud embed: {embed_url}")
+                    return {
+                        "embed_url": embed_url,
+                        "stream_url": None,
+                        "provider": "reanime",
+                        "referer_url": watch_url,
+                        "available_episodes": _count_episodes_from_soup(soup)
+                    }
+                else:
+                    log(f"[Re:ANIME][WebScraping.AI+JS] HTML returned but no flixcloud iframe found")
+        except Exception as e:
+            log(f"[Re:ANIME][WebScraping.AI+JS] Error: {e}")
+
+    # 2. Try standard rotational API fallback (ScraperAPI/ScrapingAnt/Zyte with wait_for_selector)
+    html = _fetch_with_api_fallback(
+        watch_url, 
+        use_browser=True, 
+        zyte_actions=[{"action": "waitForSelector", "selector": {"type": "css", "value": "iframe#video-player"}, "timeout": 15}],
+        wait_for_selector="iframe#video-player"
+    )
     
     if html:
         soup = BeautifulSoup(html, 'html.parser')
-        iframe = soup.select_one("iframe#video-player, iframe[src*='flixcloud.cc']")
+        iframe = soup.select_one("iframe#video-player, iframe[src*='flixcloud']")
         embed_url = iframe.get("src") if iframe else None
         
-        if embed_url and "flixcloud.cc" in embed_url:
-            log(f"[Re:ANIME][Zyte] Found FlixCloud embed: {embed_url}")
-            
-            # Count episodes
-            ep_elements = soup.select("a[data-episode]")
-            available_episodes = 1
-            if ep_elements:
-                try:
-                    ep_nums = [int(el.get("data-episode")) for el in ep_elements if el.get("data-episode").isdigit()]
-                    if ep_nums: available_episodes = max(ep_nums)
-                except: pass
-                
+        if embed_url and "flixcloud" in embed_url:
+            log(f"[Re:ANIME][API] Found FlixCloud embed: {embed_url}")
             return {
                 "embed_url": embed_url,
                 "stream_url": None,
                 "provider": "reanime",
                 "referer_url": watch_url,
-                "available_episodes": available_episodes
+                "available_episodes": _count_episodes_from_soup(soup)
             }
 
-    # 2. Fallback to Local Playwright (Free)
+    # 3. Fallback to Local Playwright with extended timeout + retry
     log(f"[Re:ANIME][Local] Using local Playwright...")
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
@@ -342,63 +523,57 @@ async def reanime_scrape_episode(slug: str, episode_number: int) -> dict | None:
         page = await context.new_page()
 
         try:
-            # Use 'load' instead of 'domcontentloaded' for heavy dynamic sites
-            await page.goto(watch_url, wait_until="load", timeout=60000)
-            
-            # Re:ANIME has a loading sequence. Wait for the player to be injected.
-            iframe_selector = "iframe#video-player, iframe[src*='flixcloud.cc']"
-            
-            log(f"[Re:ANIME] Waiting for player to be injected and synced...")
-            try:
-                # Wait up to 30s for the iframe to have a valid src
-                # Re:ANIME sometimes injects the iframe with no src first, then populates it.
-                await page.wait_for_function(
-                    """() => {
-                        const ifr = document.querySelector('iframe#video-player') || document.querySelector('iframe[src*="flixcloud.cc"]');
-                        return ifr && ifr.src && ifr.src !== '' && !ifr.src.includes(window.location.host);
-                    }""",
-                    timeout=35000
-                )
-                
-                iframe = await page.query_selector(iframe_selector)
-                embed_url = await iframe.get_attribute("src")
-                
-                if embed_url:
-                    log(f"[Re:ANIME] Found FlixCloud embed: {embed_url}")
-                    
-                    # Extract available episodes while we're here
-                    available_episodes = 1
-                    try:
-                        ep_elements = await page.query_selector_all("a[data-episode]")
-                        if ep_elements:
-                            ep_nums = []
-                            for el in ep_elements:
-                                ep_str = await el.get_attribute("data-episode")
-                                if ep_str and ep_str.isdigit():
-                                    ep_nums.append(int(ep_str))
-                            if ep_nums:
-                                available_episodes = max(ep_nums)
-                                log(f"[Re:ANIME] Detected {available_episodes} available episodes")
-                    except Exception as ee:
-                        log(f"[Re:ANIME] Failed to count episodes: {ee}")
+            iframe_js_check = """() => {
+                const ifr = document.querySelector('iframe#video-player') || document.querySelector('iframe[src*="flixcloud"]');
+                return ifr && ifr.src && ifr.src !== '' && ifr.src.includes('flixcloud');
+            }"""
 
-                    return {
-                        "embed_url": embed_url,
-                        "stream_url": None,
-                        "provider": "reanime",
-                        "referer_url": watch_url,
-                        "available_episodes": available_episodes
-                    }
-                else:
-                    log(f"[Re:ANIME] Iframe found but has no src attribute after waiting")
-            except Exception as e:
-                log(f"[Re:ANIME] Player src population timeout or error: {e}")
+            for attempt in range(1, 3):  # Up to 2 attempts
+                log(f"[Re:ANIME][Local] Attempt {attempt}/2...")
+                await page.goto(watch_url, wait_until="load", timeout=60000)
                 
-                # Debug: Log what's actually on the page
-                if await page.query_selector("div:has-text('Loading')"):
-                    log(f"[Re:ANIME] Page stuck on 'Loading' state")
-                elif await page.query_selector("div:has-text('Syncing')"):
-                    log(f"[Re:ANIME] Page stuck on 'Syncing' state")
+                log(f"[Re:ANIME] Waiting for player to be injected and synced...")
+                try:
+                    await page.wait_for_function(iframe_js_check, timeout=45000)
+                    
+                    iframe = await page.query_selector("iframe#video-player, iframe[src*='flixcloud']")
+                    embed_url = await iframe.get_attribute("src") if iframe else None
+                    
+                    if embed_url and "flixcloud" in embed_url:
+                        log(f"[Re:ANIME] Found FlixCloud embed: {embed_url}")
+                        
+                        available_episodes = 1
+                        try:
+                            ep_elements = await page.query_selector_all("a[data-episode]")
+                            if ep_elements:
+                                ep_nums = []
+                                for el in ep_elements:
+                                    ep_str = await el.get_attribute("data-episode")
+                                    if ep_str and ep_str.isdigit():
+                                        ep_nums.append(int(ep_str))
+                                if ep_nums:
+                                    available_episodes = max(ep_nums)
+                                    log(f"[Re:ANIME] Detected {available_episodes} available episodes")
+                        except Exception as ee:
+                            log(f"[Re:ANIME] Failed to count episodes: {ee}")
+
+                        return {
+                            "embed_url": embed_url,
+                            "stream_url": None,
+                            "provider": "reanime",
+                            "referer_url": watch_url,
+                            "available_episodes": available_episodes
+                        }
+                    else:
+                        log(f"[Re:ANIME] Iframe found but src is empty or invalid")
+                except Exception as e:
+                    log(f"[Re:ANIME] Player src timeout (attempt {attempt}): {e}")
+                    if await page.query_selector("div:has-text('Syncing')"):
+                        log(f"[Re:ANIME] Page stuck on 'Syncing' — will retry with reload")
+                    elif await page.query_selector("div:has-text('Loading')"):
+                        log(f"[Re:ANIME] Page stuck on 'Loading' — will retry with reload")
+                    else:
+                        break  # Unknown state, don't retry
                 
         except Exception as e:
             log(f"[Re:ANIME] Scrape error for {watch_url}: {e}")
@@ -759,10 +934,13 @@ async def animepahe_get_stream(session: str, episode_session: str) -> dict | Non
     play_url = f"https://animepahe.pw/play/{session}/{episode_session}"
     log(f"[AnimePahe] Resolving stream: {play_url}")
 
-    # 1. Try Zyte API (Turbo)
-    html = _try_zyte_api(play_url, actions=[
-        {"action": "waitForSelector", "selector": {"type": "css", "value": "#resolutionMenu button"}, "timeout": 15}
-    ])
+    # 1. Try Rotational API Fallback (Turbo)
+    html = _fetch_with_api_fallback(
+        play_url, 
+        use_browser=True, 
+        zyte_actions=[{"action": "waitForSelector", "selector": {"type": "css", "value": "#resolutionMenu button"}, "timeout": 15}],
+        wait_for_selector="#resolutionMenu button"
+    )
     
     if html:
         soup = BeautifulSoup(html, 'html.parser')
@@ -835,15 +1013,10 @@ async def resolve_kwik_stream(url: str) -> dict | None:
             log(f"[Kwik][Cache] Hit for: {url}")
             return {"stream_url": cached["stream_url"], "provider": "kwik"}
 
-    # 1. Try Zyte API (Turbo)
-    html = _try_zyte_api(url)
-    if html:
-        # Kwik stores the URL in a script tag, often packed
-        match = re.search(r'https?://[^\s\'"]+\.(?:m3u8|mp4)[^\s\'"]*', html)
-        if match:
-            stream_url = match.group(0)
-            log(f"[Kwik][Zyte] Resolved stream: {stream_url}")
-            return {"stream_url": stream_url, "provider": "kwik"}
+    # 1. Skip Rotational API Fallback for Kwik
+    # Kwik.cx requires JS execution to decrypt the URL. Zyte/ScraperAPI/etc. HTML response 
+    # will not contain the decrypted .m3u8, so the regex always fails. 
+    # We go straight to Local Playwright to save API credits.
 
     # 2. Fallback to Local Playwright (Free)
     log(f"[Kwik][Local] Using local Playwright...")

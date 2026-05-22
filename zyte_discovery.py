@@ -15,13 +15,104 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 ZYTE_API_KEY = os.getenv("ZYTE_API_KEY")
+SCRAPER_API_KEY = os.getenv("SCRAPER_API_KEY")
+SCRAPINGANT_API_KEY = os.getenv("SCRAPINGANT_API_KEY")
+WEBSCRAPING_AI_KEY = os.getenv("WEBSCRAPING_AI_KEY")
 MONGODB_URI = os.getenv("MONGODB_URI")
 MONGODB_DB = "aniverse"
 
+class APILimitReached(Exception):
+    pass
+
+def _extract_json_from_html(html, use_browser):
+    if use_browser and isinstance(html, str) and ("{" in html and "}" in html):
+        import re
+        match = re.search(r'\{.*\}', html, re.DOTALL)
+        if match:
+            return match.group()
+    return html
+
+def _fetch_with_api_fallback(url, use_browser=True):
+    html = None
+    
+    # 1. ScraperAPI
+    if SCRAPER_API_KEY:
+        try:
+            logger.info(f"[ScraperAPI] Fetching: {url}")
+            params = {"api_key": SCRAPER_API_KEY, "url": url}
+            if use_browser: params["render"] = "true"
+            response = requests.get("http://api.scraperapi.com", params=params, timeout=60)
+            if response.status_code in [401, 402, 403, 429]:
+                logger.warning(f"[ScraperAPI] Limit/Auth Error ({response.status_code}).")
+                raise APILimitReached()
+            response.raise_for_status()
+            html = response.text
+            if html:
+                logger.info("[API Status] Successfully fetched via ScraperAPI")
+                return _extract_json_from_html(html, use_browser)
+        except APILimitReached: pass
+        except Exception as e: logger.error(f"[ScraperAPI] Error: {e}")
+            
+    # 2. ScrapingAnt
+    if SCRAPINGANT_API_KEY:
+        try:
+            logger.info(f"[ScrapingAnt] Fetching: {url}")
+            params = {
+                "url": url, 
+                "browser": "true" if use_browser else "false",
+                "x-api-key": SCRAPINGANT_API_KEY
+            }
+            response = requests.get("https://api.scrapingant.com/v2/general", params=params, timeout=60)
+            if response.status_code in [401, 402, 403, 429]:
+                logger.warning(f"[ScrapingAnt] Limit/Auth Error ({response.status_code}).")
+                raise APILimitReached()
+            response.raise_for_status()
+            html = response.text
+            if html:
+                logger.info("[API Status] Successfully fetched via ScrapingAnt")
+                return _extract_json_from_html(html, use_browser)
+        except APILimitReached: pass
+        except Exception as e: logger.error(f"[ScrapingAnt] Error: {e}")
+            
+    # 3. WebScraping.AI
+    if WEBSCRAPING_AI_KEY:
+        try:
+            logger.info(f"[WebScraping.AI] Fetching: {url}")
+            params = {"api_key": WEBSCRAPING_AI_KEY, "url": url, "proxy": "residential"}
+            if use_browser: params["js"] = "true"
+            response = requests.get("https://api.webscraping.ai/html", params=params, timeout=60)
+            if response.status_code in [401, 402, 403, 429]:
+                logger.warning(f"[WebScraping.AI] Limit/Auth Error ({response.status_code}).")
+                raise APILimitReached()
+            response.raise_for_status()
+            html = response.text
+            if html:
+                logger.info("[API Status] Successfully fetched via WebScraping.AI")
+                return _extract_json_from_html(html, use_browser)
+        except APILimitReached: pass
+        except Exception as e: logger.error(f"[WebScraping.AI] Error: {e}")
+
+    # 4. Zyte API
+    if ZYTE_API_KEY:
+        try:
+            logger.info(f"[Zyte API] Fetching: {url}")
+            response = requests.post("https://api.zyte.com/v1/extract", auth=(ZYTE_API_KEY, ""), json={"url": url, "browserHtml": use_browser}, timeout=60)
+            if response.status_code in [401, 402, 403, 429]:
+                logger.warning(f"[Zyte API] Limit/Auth Error ({response.status_code}).")
+                raise APILimitReached()
+            response.raise_for_status()
+            html = response.json().get("browserHtml", "")
+            if html:
+                logger.info("[API Status] Successfully fetched via Zyte API")
+                return _extract_json_from_html(html, use_browser)
+        except APILimitReached: pass
+        except Exception as e: logger.error(f"[Zyte API] Error: {e}")
+        
+    logger.error("[API Status] All APIs exhausted or failed.")
+    return None
+
 class ZyteDiscovery:
     def __init__(self):
-        if not ZYTE_API_KEY:
-            raise ValueError("ZYTE_API_KEY not found in .env file!")
         
         self.client = pymongo.MongoClient(MONGODB_URI)
         self.db = self.client[MONGODB_DB]
@@ -35,19 +126,11 @@ class ZyteDiscovery:
         
         try:
             # Call Zyte API with Browser Rendering for the API endpoint
-            logger.info(f"Calling Zyte API (Browser Rendering) for API: {search_url}")
-            response = requests.post(
-                "https://api.zyte.com/v1/extract",
-                auth=(ZYTE_API_KEY, ""),
-                json={
-                    "url": search_url,
-                    "browserHtml": True,
-                },
-                timeout=60
-            )
-            response.raise_for_status()
-            data = response.json()
-            html = data.get("browserHtml", "")
+            # Call API Rotation
+            logger.info(f"Calling API Rotation (Browser Rendering) for: {search_url}")
+            html = _fetch_with_api_fallback(search_url, use_browser=True)
+            if not html:
+                raise Exception("Failed to fetch HTML from APIs")
 
             # The browser will wrap the JSON response in HTML tags
             if "{" in html and "}" in html:
@@ -105,14 +188,9 @@ class ZyteDiscovery:
         logger.info(f"Fetching episodes from: {api_url}")
         
         try:
-            response = requests.post(
-                "https://api.zyte.com/v1/extract",
-                auth=(ZYTE_API_KEY, ""),
-                json={"url": api_url, "browserHtml": True},
-                timeout=60
-            )
-            response.raise_for_status()
-            html = response.json().get("browserHtml", "")
+            html = _fetch_with_api_fallback(api_url, use_browser=True)
+            if not html:
+                raise Exception("Failed to fetch HTML from APIs")
             
             import re
             json_match = re.search(r'\{.*\}', html, re.DOTALL)
@@ -132,17 +210,9 @@ class ZyteDiscovery:
         logger.info(f"Extracting stream links from: {play_url}")
         
         try:
-            response = requests.post(
-                "https://api.zyte.com/v1/extract",
-                auth=(ZYTE_API_KEY, ""),
-                json={
-                    "url": play_url, 
-                    "browserHtml": True
-                },
-                timeout=60
-            )
-            response.raise_for_status()
-            html = response.json().get("browserHtml", "")
+            html = _fetch_with_api_fallback(play_url, use_browser=True)
+            if not html:
+                raise Exception("Failed to fetch HTML from APIs")
             
             soup = BeautifulSoup(html, 'html.parser')
             # AnimePahe stores stream info in buttons/links on the play page
