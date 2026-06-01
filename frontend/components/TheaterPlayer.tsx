@@ -53,12 +53,6 @@ function isValidEmbedUrl(url?: string) {
     return true;
 }
 
-function shouldProxyEmbed(url?: string, provider?: string) {
-    if (!url) return false;
-    const lower = url.toLowerCase();
-    return provider === "animepahe" && lower.includes("kwik.");
-}
-
 export default function TheaterPlayer({
     embedUrl,
     streamUrl,
@@ -112,9 +106,8 @@ export default function TheaterPlayer({
     const hasDirectPlayback = Boolean(resolvedStreamUrl);
     const preferEmbedPlayback = (provider === "animepahe" || provider === "reanime") && hasEmbedPlayback;
     const resolvedEmbedUrl = useMemo(() => {
-        if (!embedUrl) return "";
-        return shouldProxyEmbed(embedUrl, provider) ? buildProxyUrl(embedUrl, streamReferer) : embedUrl;
-    }, [embedUrl, provider, streamReferer]);
+        return embedUrl || "";
+    }, [embedUrl]);
     const activePlaybackMode =
         playbackMode === "embed" && hasEmbedPlayback
             ? "embed"

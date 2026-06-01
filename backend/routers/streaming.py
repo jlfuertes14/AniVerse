@@ -44,6 +44,10 @@ def _is_valid_embed_url(url: str | None) -> bool:
     return lower.startswith(("http://", "https://"))
 
 
+def _is_kwik_url(url: str | None) -> bool:
+    return bool(url and "kwik." in url.lower())
+
+
 async def _resolve_and_cache_embed_stream(db, stream_id, embed_url: str):
     try:
         direct_stream_url = await resolve_animepahe_embed_stream(embed_url)
@@ -195,12 +199,75 @@ async def get_episode_stream(
                 e_url = None
             referer_url = stream_data.get("referer_url")
             
-            if s_url and "kwik" in s_url:
+            if _is_kwik_url(s_url):
                 e_url = s_url
                 s_url = None
 
-            if stream_data.get("source") == "animepahe" and e_url and "kwik" in e_url and not s_url:
-                print(f"[Streaming] Reusing cached AnimePahe Kwik embed without HLS resolve: {e_url}")
+            if stream_data.get("source") == "animepahe" and _is_kwik_url(e_url) and not s_url:
+                try:
+                    print(f"[Streaming] Resolving cached AnimePahe Kwik embed: {e_url}")
+                    direct_stream_url = await resolve_animepahe_embed_stream(e_url)
+                    if direct_stream_url:
+                        s_url = direct_stream_url
+                        stream_data["stream_url"] = direct_stream_url
+                    elif stream_data.get("provider_id") and stream_data.get("episode_id"):
+                        print(
+                            f"[Streaming] Cached AnimePahe Kwik embed failed. "
+                            f"Refreshing episode link for {mal_id} Ep {resolved_ep}..."
+                        )
+                        refreshed_url = await get_animepahe_stream(
+                            stream_data["provider_id"],
+                            stream_data["episode_id"],
+                        )
+                        if refreshed_url:
+                            if _is_kwik_url(refreshed_url):
+                                e_url = refreshed_url
+                                stream_data["embed_url"] = refreshed_url
+                                await db["streams"].update_one(
+                                    {"_id": stream_data["_id"]},
+                                    {"$set": {
+                                        "stream_url": None,
+                                        "embed_url": refreshed_url,
+                                        "updated_at": "resolved",
+                                    }}
+                                )
+                                direct_stream_url = await resolve_animepahe_embed_stream(refreshed_url)
+                                if direct_stream_url:
+                                    s_url = direct_stream_url
+                                    stream_data["stream_url"] = direct_stream_url
+                            else:
+                                s_url = refreshed_url
+                                stream_data["stream_url"] = refreshed_url
+                    if not s_url:
+                        print(f"[Streaming] Returning AnimePahe Kwik embed fallback: {e_url}")
+                except Exception as e:
+                    print(f"[Streaming] AnimePahe Kwik refresh failed: {e}")
+
+            if stream_data.get("source") == "animepahe" and _is_kwik_url(e_url):
+                if s_url:
+                    e_url = None
+                else:
+                    title = (animepahe_mapping or {}).get("title")
+                    if title and not is_animepahe_refresh_in_progress(mal_id):
+                        background_tasks.add_task(
+                            refresh_animepahe_catalog,
+                            mal_id,
+                            title,
+                            resolved_ep,
+                        )
+                    pending_catalog_status = _build_catalog_status(animepahe_mapping, "animepahe")
+                    return JSONResponse(
+                        status_code=202,
+                        content={
+                            "detail": "AnimePahe direct stream is being refreshed. Please retry in a few seconds.",
+                            "mal_id": mal_id,
+                            "ep_number": resolved_ep,
+                            "status": "pending",
+                            "provider": "animepahe",
+                            "available_episodes": await _get_latest_episode_number(db, mal_id, "animepahe"),
+                            "catalog_status": pending_catalog_status.model_dump() if pending_catalog_status else None,
+                        },
+                    )
 
             mapping_for_status = None
             src = stream_data.get("source")
