@@ -119,21 +119,9 @@ async def _proxy_request(request: Request, method: str):
 
     headers = _upstream_headers(str(target), referer, request.headers.get("range"))
 
-    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-        async with client.stream(method, str(target), headers=headers) as upstream:
-            if upstream.status_code not in {200, 206}:
-                return Response(status_code=upstream.status_code, headers=_cors_headers())
-
-            content_type = upstream.headers.get("content-type", "")
-            if _is_playlist(str(target), content_type):
-                playlist_text = await upstream.aread()
-                rewritten = _rewrite_playlist(playlist_text.decode("utf-8", errors="ignore"), str(target), referer, request)
-                response_headers = _cors_headers()
-                response_headers.update({
-                    "content-type": "application/vnd.apple.mpegurl",
-                })
-                return Response(content=rewritten, status_code=200, headers=response_headers)
-
+    if method == "HEAD":
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            upstream = await client.request(method, str(target), headers=headers)
             response_headers = _cors_headers()
             for header_name in [
                 "content-type",
@@ -146,12 +134,58 @@ async def _proxy_request(request: Request, method: str):
                 header_value = upstream.headers.get(header_name)
                 if header_value:
                     response_headers[header_name] = header_value
+            return Response(status_code=upstream.status_code, headers=response_headers)
 
-            return StreamingResponse(
-                upstream.aiter_bytes(),
-                status_code=upstream.status_code,
-                headers=response_headers,
-            )
+    stream_client = httpx.AsyncClient(timeout=30.0, follow_redirects=True)
+    upstream = await stream_client.send(
+        stream_client.build_request(method, str(target), headers=headers),
+        stream=True,
+    )
+
+    if upstream.status_code not in {200, 206}:
+        await upstream.aclose()
+        await stream_client.aclose()
+        return Response(status_code=upstream.status_code, headers=_cors_headers())
+
+    content_type = upstream.headers.get("content-type", "")
+    if _is_playlist(str(target), content_type):
+        playlist_text = await upstream.aread()
+        await upstream.aclose()
+        await stream_client.aclose()
+        rewritten = _rewrite_playlist(playlist_text.decode("utf-8", errors="ignore"), str(target), referer, request)
+        response_headers = _cors_headers()
+        response_headers.update({
+            "content-type": "application/vnd.apple.mpegurl",
+        })
+        return Response(content=rewritten, status_code=200, headers=response_headers)
+
+    response_headers = _cors_headers()
+    for header_name in [
+        "content-type",
+        "content-length",
+        "content-range",
+        "accept-ranges",
+        "cache-control",
+        "etag",
+    ]:
+        header_value = upstream.headers.get(header_name)
+        if header_value:
+            response_headers[header_name] = header_value
+
+    async def stream_body():
+        try:
+            async for chunk in upstream.aiter_bytes():
+                if chunk:
+                    yield chunk
+        finally:
+            await upstream.aclose()
+            await stream_client.aclose()
+
+    return StreamingResponse(
+        stream_body(),
+        status_code=upstream.status_code,
+        headers=response_headers,
+    )
 
 
 @router.get("")
