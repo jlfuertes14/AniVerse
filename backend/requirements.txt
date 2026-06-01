@@ -11,7 +11,7 @@ numpy
 motor
 bcrypt
 python-jose[cryptography]
-playwright
+playwright==1.40.0
 groq
 beautifulsoup4
 requests
