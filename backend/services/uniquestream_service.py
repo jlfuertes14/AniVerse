@@ -79,7 +79,13 @@ def _run_uniquestream_scraper(title: str, episode_number: int) -> Optional[Dict[
         if not lines or not lines[-1].strip(): return None
         data = json.loads(lines[-1])
         return data if data else None
-    except Exception:
+    except subprocess.CalledProcessError as e:
+        print(f"[Uniquestream] Subprocess failed with exit code {e.returncode}")
+        if e.stdout: print(f"[Uniquestream] STDOUT: {e.stdout}")
+        if e.stderr: print(f"[Uniquestream] STDERR: {e.stderr}")
+        return None
+    except Exception as e:
+        print(f"[Uniquestream] Subprocess error: {e}")
         return None
 
 async def check_uniquestream_refresh_in_progress(mal_id: int) -> bool:

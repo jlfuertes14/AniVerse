@@ -79,7 +79,13 @@ def _run_animeverse_scraper(title: str, episode_number: int) -> Optional[Dict[st
         if not lines or not lines[-1].strip(): return None
         data = json.loads(lines[-1])
         return data if data else None
-    except Exception:
+    except subprocess.CalledProcessError as e:
+        print(f"[Animeverse] Subprocess failed with exit code {e.returncode}")
+        if e.stdout: print(f"[Animeverse] STDOUT: {e.stdout}")
+        if e.stderr: print(f"[Animeverse] STDERR: {e.stderr}")
+        return None
+    except Exception as e:
+        print(f"[Animeverse] Subprocess error: {e}")
         return None
 
 def is_animeverse_refresh_in_progress(mal_id: int) -> bool:

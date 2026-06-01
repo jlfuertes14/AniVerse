@@ -20,13 +20,6 @@ async def refresh_shiroko_catalog(mal_id: int, episode_number: int):
         upsert=True
     )
     
-    # We need the Anilist ID for Shiroko
-    anime = await db["anime_details"].find_one({"mal_id": mal_id})
-    if not anime:
-        print(f"[Shiroko] No anime details found for MAL ID {mal_id}")
-        await _clear_refreshing(db, mal_id)
-        return
-        
     # Find mapping for Anilist ID
     anilist_mapping = await db["anime_mappings"].find_one({"mal_id": mal_id})
     if not anilist_mapping or not anilist_mapping.get("anilist_id"):
