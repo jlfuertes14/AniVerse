@@ -46,9 +46,14 @@ function isHlsStream(url?: string) {
     return lower.includes(".m3u8") || lower.includes("mpegurl");
 }
 
+function isKwikUrl(url?: string) {
+    return Boolean(url && url.toLowerCase().includes("kwik."));
+}
+
 function isValidEmbedUrl(url?: string) {
     if (!url) return false;
     const lower = url.toLowerCase();
+    if (lower.includes("kwik.")) return false;
     if (lower.includes("theanimecommunity.com/embed-widget")) return false;
     return true;
 }
@@ -77,7 +82,7 @@ export default function TheaterPlayer({
         if (refererUrl) {
             return refererUrl;
         }
-        if (provider === "animepahe" || streamUrl?.includes("owocdn.top") || streamUrl?.includes("kwik.cx")) {
+        if (provider === "animepahe" || streamUrl?.includes("owocdn.top") || isKwikUrl(streamUrl)) {
             return "https://kwik.cx/";
         }
         if (provider === "reanime") {
@@ -104,7 +109,7 @@ export default function TheaterPlayer({
     const useHlsPlayback = useMemo(() => isHlsStream(streamUrl), [streamUrl]);
     const hasEmbedPlayback = isValidEmbedUrl(embedUrl);
     const hasDirectPlayback = Boolean(resolvedStreamUrl);
-    const preferEmbedPlayback = (provider === "animepahe" || provider === "reanime") && hasEmbedPlayback;
+    const preferEmbedPlayback = provider === "reanime" && hasEmbedPlayback;
     const resolvedEmbedUrl = useMemo(() => {
         return embedUrl || "";
     }, [embedUrl]);
@@ -377,6 +382,19 @@ export default function TheaterPlayer({
                         )}
                     </div>
                 )}
+            </div>
+        );
+    }
+
+    if (!hasDirectPlayback && !hasEmbedPlayback) {
+        return (
+            <div className="theater-player hls-mode">
+                <div className="theater-status">
+                    <span>Refreshing direct stream...</span>
+                </div>
+                <div className="theater-error">
+                    <p>This AnimePahe link needs a fresh HLS stream. Try again in a few seconds or switch server.</p>
+                </div>
             </div>
         );
     }
