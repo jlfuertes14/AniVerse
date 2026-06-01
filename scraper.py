@@ -51,6 +51,8 @@ ZYTE_API_KEY = os.environ.get("ZYTE_API_KEY")
 SCRAPER_API_KEY = os.environ.get("SCRAPER_API_KEY")
 SCRAPINGANT_API_KEY = os.environ.get("SCRAPINGANT_API_KEY")
 WEBSCRAPING_AI_KEY = os.environ.get("WEBSCRAPING_AI_KEY")
+SCRAPINGBEE_API_KEY = os.environ.get("SCRAPINGBEE_API_KEY")
+BROWSERLESS_API_KEY = os.environ.get("BROWSERLESS_API_KEY")
 
 class APILimitReached(Exception):
     pass
@@ -157,6 +159,38 @@ def _try_webscraping_ai(url, use_browser=True):
         _log(f"[WebScraping.AI] Error: {e}")
         return None
 
+def _try_scrapingbee(url, use_browser=True, wait_for_selector=None):
+    if not SCRAPINGBEE_API_KEY: return None
+    import requests
+    _log(f"[ScrapingBee] Fetching: {url}")
+    params = {
+        "api_key": SCRAPINGBEE_API_KEY,
+        "url": url,
+        "render_js": "true" if use_browser else "false",
+        "premium_proxy": "true",
+        "stealth_proxy": "true",
+    }
+    if wait_for_selector:
+        # ScrapingBee uses wait_for to wait for css selector
+        params["wait_for"] = wait_for_selector
+        
+    try:
+        response = requests.get("https://app.scrapingbee.com/api/v1/", params=params, timeout=60)
+        if response.status_code in [401, 402, 403, 429]:
+            _log(f"[ScrapingBee] Limit/Auth Error ({response.status_code}). Exhausted.")
+            raise APILimitReached("ScrapingBee Exhausted")
+        response.raise_for_status()
+        html = response.text
+        if _is_cloudflare_blocked(html):
+            _log("[ScrapingBee] Cloudflare block detected. Treating as failure.")
+            return None
+        return _extract_json_from_html(html, use_browser)
+    except APILimitReached:
+        raise
+    except Exception as e:
+        _log(f"[ScrapingBee] Error: {e}")
+        return None
+
 def _try_zyte_api(url, use_browser=True, zyte_actions=None):
     if not ZYTE_API_KEY: return None
     import requests
@@ -183,6 +217,105 @@ def _try_zyte_api(url, use_browser=True, zyte_actions=None):
     except Exception as e:
         _log(f"[Zyte API] Error: {e}")
         return None
+
+async def _try_browserless(url, wait_for_selector=None):
+    if not BROWSERLESS_API_KEY: return None
+    _log(f"[Browserless.io] Fetching: {url}")
+    ws_endpoint = f"wss://chrome.browserless.io/?token={BROWSERLESS_API_KEY}"
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.connect_over_cdp(ws_endpoint)
+            context = await browser.new_context()
+            page = await context.new_page()
+            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+            if wait_for_selector:
+                await page.wait_for_selector(wait_for_selector, timeout=15000)
+            else:
+                await page.wait_for_timeout(3000)
+            html = await page.content()
+            await browser.close()
+            if _is_cloudflare_blocked(html):
+                _log("[Browserless.io] Cloudflare block detected. Treating as failure.")
+                return None
+            return html
+    except Exception as e:
+        _log(f"[Browserless.io] Error: {e}")
+        return None
+
+async def _try_local_playwright(url, wait_for_selector=None):
+    _log(f"[Local Playwright] Fetching: {url}")
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            context = await browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+            )
+            page = await context.new_page()
+            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            if wait_for_selector:
+                await page.wait_for_selector(wait_for_selector, timeout=10000)
+            else:
+                await page.wait_for_timeout(3000)
+            html = await page.content()
+            await browser.close()
+            if _is_cloudflare_blocked(html):
+                _log("[Local Playwright] Cloudflare block detected. Treating as failure.")
+                return None
+            return html
+    except Exception as e:
+        _log(f"[Local Playwright] Error: {e}")
+        return None
+
+async def fetch_html_hybrid(url, wait_for_selector=None):
+    """
+    Hybrid Fetcher: Local Playwright -> Browserless -> ScrapingAnt -> WebScraping.AI -> ScrapingBee -> Zyte API
+    """
+    # 1. Local Playwright
+    html = await _try_local_playwright(url, wait_for_selector)
+    if html:
+        _log("[Hybrid Fetcher] Successfully fetched via Local Playwright")
+        return html
+        
+    # 2. Browserless
+    html = await _try_browserless(url, wait_for_selector)
+    if html:
+        _log("[Hybrid Fetcher] Successfully fetched via Browserless.io")
+        return html
+
+    # 3. ScrapingAnt
+    try:
+        html = _try_scrapingant_api(url, use_browser=True, wait_for_selector=wait_for_selector)
+        if html:
+            _log("[Hybrid Fetcher] Successfully fetched via ScrapingAnt")
+            return html
+    except APILimitReached: pass
+
+    # 4. WebScraping.AI
+    try:
+        html = _try_webscraping_ai(url, use_browser=True)
+        if html:
+            _log("[Hybrid Fetcher] Successfully fetched via WebScraping.AI")
+            return html
+    except APILimitReached: pass
+
+    # 5. ScrapingBee (Moved down to save credits)
+    try:
+        html = _try_scrapingbee(url, use_browser=True, wait_for_selector=wait_for_selector)
+        if html:
+            _log("[Hybrid Fetcher] Successfully fetched via ScrapingBee")
+            return html
+    except APILimitReached: pass
+
+    # 6. Zyte API (Fallback)
+    try:
+        html = _try_zyte_api(url, use_browser=True)
+        if html:
+            _log("[Hybrid Fetcher] Successfully fetched via Zyte API")
+            return html
+    except APILimitReached: pass
+
+    _log("[Hybrid Fetcher] All proxies exhausted or failed.")
+    return None
 
 def _fetch_with_api_fallback(url, use_browser=True, zyte_actions=None, sapi_instructions=None, wait_for_selector=None):
     """
@@ -1201,3 +1334,200 @@ async def main():
 if __name__ == "__main__":
     import asyncio
     asyncio.run(main())
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Shiroko Scraper
+# ═══════════════════════════════════════════════════════════════
+
+async def shiroko_scrape_episode(anilist_id: int, episode_number: int) -> dict | None:
+    """
+    Extract stream URL for a Shiroko episode.
+    Shiroko uses AniList IDs directly in the URL: https://shiroko.co/watch?id={anilist_id}&n={episode_number}
+    """
+    from playwright.async_api import async_playwright
+    import re
+    
+    watch_url = f"https://shiroko.co/watch?id={anilist_id}&n={episode_number}"
+    _log(f"[Shiroko] Starting stream extraction: {watch_url}")
+
+    # Check cache first
+    if db is not None:
+        cached = db.streams.find_one({"referer_url": watch_url, "provider": "shiroko"})
+        if cached and cached.get("stream_url"):
+            _log(f"[Shiroko][Cache] Hit for: {watch_url}")
+            return {
+                "stream_url": cached["stream_url"],
+                "provider": "shiroko",
+                "referer_url": watch_url,
+                "available_episodes": cached.get("available_episodes", episode_number)
+            }
+
+    _log(f"[Shiroko][Local] Using local Playwright for network interception...")
+    m3u8_candidates = []
+    
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        )
+        page = await context.new_page()
+
+        def handle_response(res):
+            url_lower = res.url.lower()
+            if ".m3u8" in url_lower:
+                m3u8_candidates.append(res.url)
+
+        page.on("response", handle_response)
+
+        try:
+            await page.goto(watch_url, wait_until="domcontentloaded", timeout=45000)
+            
+            # Wait for video player to initialize
+            try:
+                # The video player or an iframe usually appears
+                await page.wait_for_selector("video, iframe, .art-video-player, #player", timeout=15000)
+                await page.wait_for_timeout(5000) # Give it some time to fetch the m3u8
+            except Exception as e:
+                _log(f"[Shiroko] Timeout waiting for player on {watch_url}: {e}")
+
+            html = await page.content()
+            iframe_matches = re.findall(r'''<iframe[^>]+src=["']([^"']+)["']''', html)
+            
+            if not m3u8_candidates:
+                _log(f"[Shiroko] No .m3u8 found on initial load. Trying to click other servers...")
+                servers = await page.query_selector_all("div.server-item, button.server-btn, li.server")
+                for server in servers:
+                    try:
+                        await server.click()
+                        await page.wait_for_timeout(3000)
+                        if m3u8_candidates:
+                            _log(f"[Shiroko] Found .m3u8 after clicking a server!")
+                            break
+                    except:
+                        pass
+
+        except Exception as e:
+            _log(f"[Shiroko] Scrape error: {e}")
+        finally:
+            await browser.close()
+
+    if m3u8_candidates:
+        # Prioritize the actual playlist m3u8
+        selected_m3u8 = m3u8_candidates[0]
+        for url in m3u8_candidates:
+            if "master.m3u8" in url or "pl.m3u8" in url:
+                selected_m3u8 = url
+                break
+                
+        return {
+            "stream_url": selected_m3u8,
+            "embed_url": iframe_matches[0] if iframe_matches else None,
+            "all_qualities": list(set(m3u8_candidates)),
+            "provider": "shiroko",
+            "referer_url": watch_url
+        }
+    
+    return None
+
+import asyncio
+from bs4 import BeautifulSoup
+from urllib.parse import quote_plus
+from scraper import fetch_html_hybrid, _log
+
+async def animeverse_scrape_episode(title: str, episode_number: int) -> dict | None:
+    """
+    Search Animeverse for the title, get the episode watch link, and extract the iframe.
+    """
+    search_url = f"https://animeverse.to/search?q={quote_plus(title)}"
+    _log(f"[Animeverse] Searching: {search_url}")
+    
+    html = await fetch_html_hybrid(search_url, wait_for_selector="a[href*='/watch/']")
+    if not html:
+        _log("[Animeverse] Failed to fetch search page.")
+        return None
+        
+    soup = BeautifulSoup(html, 'html.parser')
+    # Find the first anime link in search results
+    anime_links = soup.find_all('a', href=True)
+    watch_base_url = None
+    for link in anime_links:
+        href = link['href']
+        if '/watch/' in href:
+            watch_base_url = href
+            break
+            
+    if not watch_base_url:
+        _log("[Animeverse] No watch link found in search results.")
+        return None
+        
+    # Append episode number or navigate to episode
+    if not watch_base_url.startswith('http'):
+        watch_base_url = f"https://animeverse.to{watch_base_url}"
+        
+    _log(f"[Animeverse] Found base watch URL: {watch_base_url}. Fetching to find episode {episode_number}...")
+    watch_html = await fetch_html_hybrid(watch_base_url, wait_for_selector="iframe")
+    if not watch_html:
+        _log("[Animeverse] Failed to fetch base watch page.")
+        return None
+        
+    watch_soup = BeautifulSoup(watch_html, 'html.parser')
+    
+    # Try to find the iframe directly
+    iframe = watch_soup.find('iframe')
+    if iframe and iframe.get('src'):
+        return {
+            "embed_url": iframe['src'],
+            "provider": "animeverse",
+            "referer_url": watch_base_url
+        }
+        
+    return None
+
+async def uniquestream_scrape_episode(title: str, episode_number: int) -> dict | None:
+    """
+    Search Uniquestream for the title, get the episode watch link, and extract the iframe.
+    """
+    search_url = f"https://anime.uniquestream.net/search?q={quote_plus(title)}"
+    _log(f"[Uniquestream] Searching: {search_url}")
+    
+    html = await fetch_html_hybrid(search_url, wait_for_selector="a[href*='/watch/']")
+    if not html:
+        _log("[Uniquestream] Failed to fetch search page.")
+        return None
+        
+    soup = BeautifulSoup(html, 'html.parser')
+    anime_links = soup.find_all('a', href=True)
+    watch_base_url = None
+    for link in anime_links:
+        href = link['href']
+        if '/watch/' in href:
+            watch_base_url = href
+            break
+            
+    if not watch_base_url:
+        _log("[Uniquestream] No watch link found in search results.")
+        return None
+        
+    if not watch_base_url.startswith('http'):
+        watch_base_url = f"https://anime.uniquestream.net{watch_base_url}"
+        
+    _log(f"[Uniquestream] Found base watch URL: {watch_base_url}. Fetching...")
+    watch_html = await fetch_html_hybrid(watch_base_url)
+    if not watch_html:
+        _log("[Uniquestream] Failed to fetch base watch page.")
+        return None
+        
+    watch_soup = BeautifulSoup(watch_html, 'html.parser')
+    
+    # Try to find the iframe directly
+    iframe = watch_soup.find('iframe')
+    if iframe and iframe.get('src'):
+        return {
+            "embed_url": iframe['src'],
+            "provider": "uniquestream",
+            "referer_url": watch_base_url
+        }
+        
+    return None
+

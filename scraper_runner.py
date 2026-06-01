@@ -1133,6 +1133,22 @@ async def run_action(action: str, params: dict):
     elif action == "reanime_scrape_episode":
         return await reanime_scrape_episode(params["slug"], params["episode_number"])
 
+    elif action == "miruro_episode":
+        from scraper import miruro_scrape_episode
+        return await miruro_scrape_episode(params["anilist_id"], params["episode_number"])
+
+    elif action == "shiroko_episode":
+        from scraper import shiroko_scrape_episode
+        return await shiroko_scrape_episode(params["anilist_id"], params["episode_number"])
+
+    elif action == "animeverse_episode":
+        from scraper import animeverse_scrape_episode
+        return await animeverse_scrape_episode(params["title"], params["episode_number"])
+
+    elif action == "uniquestream_episode":
+        from scraper import uniquestream_scrape_episode
+        return await uniquestream_scrape_episode(params["title"], params["episode_number"])
+
     else:
         log(f"Unknown action: {action}")
         return None

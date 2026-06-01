@@ -26,8 +26,12 @@ router = APIRouter(prefix="/stream", tags=["streaming"])
 
 
 SOURCE_PRIORITY = {
-    "reanime": 0,
-    "animepahe": 1,
+    "shiroko": 0,
+    "miruro": 1,
+    "animeverse": 2,
+    "uniquestream": 3,
+    "reanime": 4,
+    "animepahe": 5,
 }
 
 
@@ -122,6 +126,10 @@ async def get_episode_stream(
 
     animepahe_mapping = await get_animepahe_mapping(mal_id)
     reanime_mapping = await db["provider_mappings"].find_one({"mal_id": mal_id, "provider": "reanime"})
+    miruro_mapping = await db["provider_mappings"].find_one({"mal_id": mal_id, "provider": "miruro"})
+    shiroko_mapping = await db["provider_mappings"].find_one({"mal_id": mal_id, "provider": "shiroko"})
+    animeverse_mapping = await db["provider_mappings"].find_one({"mal_id": mal_id, "provider": "animeverse"})
+    uniquestream_mapping = await db["provider_mappings"].find_one({"mal_id": mal_id, "provider": "uniquestream"})
 
     # 1. Check DB for available sources
     stream_candidates = await db["streams"].find(
@@ -129,7 +137,7 @@ async def get_episode_stream(
     ).to_list(length=20)
 
     preferred_record = None
-    if prefer in {"reanime", "animepahe"}:
+    if prefer in {"shiroko", "miruro", "animeverse", "uniquestream", "reanime", "animepahe"}:
         matches = [record for record in stream_candidates if record.get("source") == prefer]
         if matches:
             preferred_record = _sort_stream_candidates(matches)[0]
@@ -188,6 +196,15 @@ async def get_episode_stream(
                     e_url,
                 )
 
+            mapping_for_status = None
+            src = stream_data.get("source")
+            if src == "shiroko": mapping_for_status = shiroko_mapping
+            elif src == "miruro": mapping_for_status = miruro_mapping
+            elif src == "animeverse": mapping_for_status = animeverse_mapping
+            elif src == "uniquestream": mapping_for_status = uniquestream_mapping
+            elif src == "animepahe": mapping_for_status = animepahe_mapping
+            else: mapping_for_status = reanime_mapping
+
             print(f"[Streaming] Returning {stream_data.get('source')} stream for {mal_id} Ep {resolved_ep}")
             return StreamResponse(
                 mal_id=mal_id,
@@ -203,7 +220,7 @@ async def get_episode_stream(
                 ),
                 referer_url=referer_url,
                 catalog_status=_build_catalog_status(
-                    animepahe_mapping if stream_data.get("source") == "animepahe" else reanime_mapping, 
+                    mapping_for_status,
                     stream_data.get("source", "unknown")
                 ),
             )
@@ -216,7 +233,191 @@ async def get_episode_stream(
         
         search_title = anime.title_english or anime.title
 
-        # --- Re:ANIME Discovery (Primary) ---
+        # --- Shiroko Discovery (Primary 0) ---
+        if prefer not in {"miruro", "animeverse", "uniquestream", "reanime", "animepahe"}:
+            from backend.services.shiroko_service import check_shiroko_refresh_in_progress, refresh_shiroko_catalog
+            
+            if await check_shiroko_refresh_in_progress(mal_id):
+                pending_catalog_status = _build_catalog_status(shiroko_mapping, "shiroko")
+                return JSONResponse(
+                    status_code=202,
+                    content={
+                        "detail": "Shiroko stream is being fetched. Please refresh in a few seconds.",
+                        "mal_id": mal_id,
+                        "ep_number": ep_number,
+                        "status": "pending",
+                        "provider": "shiroko",
+                        "available_episodes": int(shiroko_mapping.get("latest_episode", 0)) if shiroko_mapping else 0,
+                        "catalog_status": pending_catalog_status.model_dump() if pending_catalog_status else None,
+                    }
+                )
+
+            shiroko_stale = True
+            if shiroko_mapping and shiroko_mapping.get("last_catalog_check_at"):
+                last_check = datetime.fromisoformat(shiroko_mapping["last_catalog_check_at"].replace("Z", "+00:00"))
+                if datetime.now(timezone.utc) - last_check < timedelta(minutes=15):
+                    shiroko_stale = False
+
+            if shiroko_stale:
+                print(f"[Streaming] Queueing Shiroko discovery for MAL {mal_id} Ep {ep_number}...")
+                background_tasks.add_task(refresh_shiroko_catalog, mal_id, ep_number)
+                
+                pending_catalog_status = _build_catalog_status(shiroko_mapping, "shiroko")
+                return JSONResponse(
+                    status_code=202,
+                    content={
+                        "detail": "Shiroko stream is being fetched. Please refresh in a few seconds.",
+                        "mal_id": mal_id,
+                        "ep_number": ep_number,
+                        "status": "pending",
+                        "provider": "shiroko",
+                        "available_episodes": int(shiroko_mapping.get("latest_episode", 0)) if shiroko_mapping else 0,
+                        "catalog_status": pending_catalog_status.model_dump() if pending_catalog_status else None,
+                    }
+                )
+            else:
+                print(f"[Streaming] Shiroko discovery recently checked and skipped. Falling back to Miruro...")
+
+        # --- Miruro Discovery (Priority 1) ---
+        if prefer not in {"animeverse", "uniquestream", "reanime", "animepahe"}:
+            from backend.services.miruro_service import is_miruro_refresh_in_progress, refresh_miruro_catalog
+            
+            if is_miruro_refresh_in_progress(mal_id):
+                pending_catalog_status = _build_catalog_status(miruro_mapping, "miruro")
+                return JSONResponse(
+                    status_code=202,
+                    content={
+                        "detail": "Miruro stream is being fetched. Please refresh in a few seconds.",
+                        "mal_id": mal_id,
+                        "ep_number": ep_number,
+                        "status": "pending",
+                        "provider": "miruro",
+                        "available_episodes": int(miruro_mapping.get("latest_episode", 0)) if miruro_mapping else 0,
+                        "catalog_status": pending_catalog_status.model_dump() if pending_catalog_status else None,
+                    }
+                )
+
+            miruro_stale = True
+            if miruro_mapping and miruro_mapping.get("last_catalog_check_at"):
+                last_check = datetime.fromisoformat(miruro_mapping["last_catalog_check_at"].replace("Z", "+00:00"))
+                if datetime.now(timezone.utc) - last_check < timedelta(minutes=15):
+                    miruro_stale = False
+
+            if miruro_stale:
+                print(f"[Streaming] Queueing Miruro discovery for MAL {mal_id} Ep {ep_number}...")
+                background_tasks.add_task(
+                    refresh_miruro_catalog,
+                    mal_id,
+                    ep_number,
+                )
+                
+                pending_catalog_status = _build_catalog_status(miruro_mapping, "miruro")
+                return JSONResponse(
+                    status_code=202,
+                    content={
+                        "detail": "Miruro stream is being fetched. Please refresh in a few seconds.",
+                        "mal_id": mal_id,
+                        "ep_number": ep_number,
+                        "status": "pending",
+                        "provider": "miruro",
+                        "available_episodes": int(miruro_mapping.get("latest_episode", 0)) if miruro_mapping else 0,
+                        "catalog_status": pending_catalog_status.model_dump() if pending_catalog_status else None,
+                    }
+                )
+            else:
+                print(f"[Streaming] Miruro discovery recently checked and skipped. Falling back to Animeverse...")
+
+        # --- Animeverse Discovery (Priority 2) ---
+        if prefer not in {"uniquestream", "reanime", "animepahe"}:
+            from backend.services.animeverse_service import check_animeverse_refresh_in_progress, refresh_animeverse_catalog
+            
+            if await check_animeverse_refresh_in_progress(mal_id):
+                pending_catalog_status = _build_catalog_status(animeverse_mapping, "animeverse")
+                return JSONResponse(
+                    status_code=202,
+                    content={
+                        "detail": "Animeverse stream is being fetched. Please refresh in a few seconds.",
+                        "mal_id": mal_id,
+                        "ep_number": ep_number,
+                        "status": "pending",
+                        "provider": "animeverse",
+                        "available_episodes": int(animeverse_mapping.get("latest_episode", 0)) if animeverse_mapping else 0,
+                        "catalog_status": pending_catalog_status.model_dump() if pending_catalog_status else None,
+                    }
+                )
+
+            animeverse_stale = True
+            if animeverse_mapping and animeverse_mapping.get("last_catalog_check_at"):
+                last_check = datetime.fromisoformat(animeverse_mapping["last_catalog_check_at"].replace("Z", "+00:00"))
+                if datetime.now(timezone.utc) - last_check < timedelta(minutes=15):
+                    animeverse_stale = False
+
+            if animeverse_stale:
+                print(f"[Streaming] Queueing Animeverse discovery for MAL {mal_id} Ep {ep_number}...")
+                background_tasks.add_task(refresh_animeverse_catalog, mal_id, search_title, ep_number)
+                
+                pending_catalog_status = _build_catalog_status(animeverse_mapping, "animeverse")
+                return JSONResponse(
+                    status_code=202,
+                    content={
+                        "detail": "Animeverse stream is being fetched. Please refresh in a few seconds.",
+                        "mal_id": mal_id,
+                        "ep_number": ep_number,
+                        "status": "pending",
+                        "provider": "animeverse",
+                        "available_episodes": int(animeverse_mapping.get("latest_episode", 0)) if animeverse_mapping else 0,
+                        "catalog_status": pending_catalog_status.model_dump() if pending_catalog_status else None,
+                    }
+                )
+            else:
+                print(f"[Streaming] Animeverse discovery recently checked and skipped. Falling back to Uniquestream...")
+
+        # --- Uniquestream Discovery (Priority 3) ---
+        if prefer not in {"reanime", "animepahe"}:
+            from backend.services.uniquestream_service import check_uniquestream_refresh_in_progress, refresh_uniquestream_catalog
+            
+            if await check_uniquestream_refresh_in_progress(mal_id):
+                pending_catalog_status = _build_catalog_status(uniquestream_mapping, "uniquestream")
+                return JSONResponse(
+                    status_code=202,
+                    content={
+                        "detail": "Uniquestream stream is being fetched. Please refresh in a few seconds.",
+                        "mal_id": mal_id,
+                        "ep_number": ep_number,
+                        "status": "pending",
+                        "provider": "uniquestream",
+                        "available_episodes": int(uniquestream_mapping.get("latest_episode", 0)) if uniquestream_mapping else 0,
+                        "catalog_status": pending_catalog_status.model_dump() if pending_catalog_status else None,
+                    }
+                )
+
+            uniquestream_stale = True
+            if uniquestream_mapping and uniquestream_mapping.get("last_catalog_check_at"):
+                last_check = datetime.fromisoformat(uniquestream_mapping["last_catalog_check_at"].replace("Z", "+00:00"))
+                if datetime.now(timezone.utc) - last_check < timedelta(minutes=15):
+                    uniquestream_stale = False
+
+            if uniquestream_stale:
+                print(f"[Streaming] Queueing Uniquestream discovery for MAL {mal_id} Ep {ep_number}...")
+                background_tasks.add_task(refresh_uniquestream_catalog, mal_id, search_title, ep_number)
+                
+                pending_catalog_status = _build_catalog_status(uniquestream_mapping, "uniquestream")
+                return JSONResponse(
+                    status_code=202,
+                    content={
+                        "detail": "Uniquestream stream is being fetched. Please refresh in a few seconds.",
+                        "mal_id": mal_id,
+                        "ep_number": ep_number,
+                        "status": "pending",
+                        "provider": "uniquestream",
+                        "available_episodes": int(uniquestream_mapping.get("latest_episode", 0)) if uniquestream_mapping else 0,
+                        "catalog_status": pending_catalog_status.model_dump() if pending_catalog_status else None,
+                    }
+                )
+            else:
+                print(f"[Streaming] Uniquestream discovery recently checked and skipped. Falling back to Re:ANIME...")
+
+        # --- Re:ANIME Discovery (Secondary) ---
         if prefer != "animepahe":
             from backend.services.reanime_service import is_reanime_refresh_in_progress, refresh_reanime_catalog
             
