@@ -22,12 +22,22 @@ async def refresh_shiroko_catalog(mal_id: int, episode_number: int):
     
     # Find mapping for Anilist ID
     anilist_mapping = await db["anime_mappings"].find_one({"mal_id": mal_id})
-    if not anilist_mapping or not anilist_mapping.get("anilist_id"):
-        print(f"[Shiroko] No Anilist ID found for MAL ID {mal_id}")
+    anilist_id = None
+    if anilist_mapping and anilist_mapping.get("anilist_id"):
+        anilist_id = anilist_mapping["anilist_id"]
+    else:
+        # Fallback to dynamic lookup using AniList GraphQL API
+        print(f"[Shiroko] No Anilist ID found for MAL {mal_id} in DB. Fetching from AniList API...")
+        try:
+            from backend.services.anilist_service import get_anilist_id_by_mal_id
+            anilist_id = await get_anilist_id_by_mal_id(mal_id)
+        except Exception as e:
+            print(f"[Shiroko] Dynamic AniList lookup failed: {e}")
+            
+    if not anilist_id:
+        print(f"[Shiroko] Failed to resolve Anilist ID for MAL ID {mal_id}")
         await _clear_refreshing(db, mal_id)
         return
-        
-    anilist_id = anilist_mapping["anilist_id"]
     
     try:
         # We can run this in an executor thread so it doesn't block asyncio
