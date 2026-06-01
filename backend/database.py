@@ -10,6 +10,7 @@ load_dotenv()
 MONGODB_URI = os.getenv("MONGODB_URI")
 if not MONGODB_URI:
     raise ValueError("MONGODB_URI environment variable is not set")
+MONGODB_URI = MONGODB_URI.strip()
 DB_NAME = "aniverse"
 MANUAL_PROVIDER_MAPPINGS = [
     {
