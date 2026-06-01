@@ -396,8 +396,14 @@ async def _upsert_animepahe_stream_record(
         normalized_embed_url = normalized_stream_url
         normalized_stream_url = None
 
-    preserved_stream_url = normalized_stream_url or existing.get("stream_url")
-    preserved_embed_url = normalized_embed_url or existing.get("embed_url")
+    existing_stream_url = existing.get("stream_url")
+    existing_embed_url = existing.get("embed_url")
+    if existing_stream_url and "kwik" in existing_stream_url.lower():
+        existing_embed_url = existing_embed_url or existing_stream_url
+        existing_stream_url = None
+
+    preserved_stream_url = normalized_stream_url or existing_stream_url
+    preserved_embed_url = normalized_embed_url or existing_embed_url
 
     await db["streams"].update_one(
         {"anilist_id": anilist_id, "episode": episode_number, "source": "animepahe"},

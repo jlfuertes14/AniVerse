@@ -48,7 +48,15 @@ function isHlsStream(url?: string) {
 
 function isValidEmbedUrl(url?: string) {
     if (!url) return false;
-    return !url.toLowerCase().includes("theanimecommunity.com/embed-widget");
+    const lower = url.toLowerCase();
+    if (lower.includes("theanimecommunity.com/embed-widget")) return false;
+    return true;
+}
+
+function shouldProxyEmbed(url?: string, provider?: string) {
+    if (!url) return false;
+    const lower = url.toLowerCase();
+    return provider === "animepahe" && lower.includes("kwik.");
 }
 
 export default function TheaterPlayer({
@@ -103,6 +111,10 @@ export default function TheaterPlayer({
     const hasEmbedPlayback = isValidEmbedUrl(embedUrl);
     const hasDirectPlayback = Boolean(resolvedStreamUrl);
     const preferEmbedPlayback = (provider === "animepahe" || provider === "reanime") && hasEmbedPlayback;
+    const resolvedEmbedUrl = useMemo(() => {
+        if (!embedUrl) return "";
+        return shouldProxyEmbed(embedUrl, provider) ? buildProxyUrl(embedUrl, streamReferer) : embedUrl;
+    }, [embedUrl, provider, streamReferer]);
     const activePlaybackMode =
         playbackMode === "embed" && hasEmbedPlayback
             ? "embed"
@@ -401,7 +413,7 @@ export default function TheaterPlayer({
                 </div>
             )}
             <iframe
-                src={embedUrl}
+                src={resolvedEmbedUrl || embedUrl}
                 className="theater-iframe"
                 allowFullScreen
                 sandbox="allow-forms allow-pointer-lock allow-same-origin allow-scripts"
