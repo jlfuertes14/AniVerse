@@ -351,14 +351,19 @@ export default function TheaterPlayer({
                     <div className="theater-error">
                         <p>{errorMessage}</p>
                         {embedUrl && (
-                            <a
-                                href={embedUrl}
-                                target="_blank"
-                                rel="noreferrer"
+                            <button
+                                type="button"
                                 className="theater-error-link"
+                                onClick={() => {
+                                    hlsRef.current?.destroy();
+                                    hlsRef.current = null;
+                                    setIsLoading(false);
+                                    setErrorMessage("");
+                                    setPlaybackMode("embed");
+                                }}
                             >
                                 Open backup server
-                            </a>
+                            </button>
                         )}
                     </div>
                 )}
