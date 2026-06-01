@@ -51,6 +51,10 @@ ZYTE_API_KEY = os.environ.get("ZYTE_API_KEY")
 SCRAPER_API_KEY = os.environ.get("SCRAPER_API_KEY")
 SCRAPINGANT_API_KEY = os.environ.get("SCRAPINGANT_API_KEY")
 WEBSCRAPING_AI_KEY = os.environ.get("WEBSCRAPING_AI_KEY")
+ZENSCRAPE_API_KEY = os.environ.get("ZENSCRAPE_API_KEY")
+SCRAPEDO_API_KEY = os.environ.get("SCRAPEDO_API_KEY")
+SCRAPFLY_API_KEY = os.environ.get("SCRAPFLY_API_KEY")
+
 SCRAPINGBEE_API_KEY = os.environ.get("SCRAPINGBEE_API_KEY")
 BROWSERLESS_API_KEY = os.environ.get("BROWSERLESS_API_KEY")
 
@@ -229,7 +233,7 @@ async def _try_browserless(url, wait_for_selector=None):
             page = await context.new_page()
             await page.goto(url, wait_until="domcontentloaded", timeout=45000)
             if wait_for_selector:
-                await page.wait_for_selector(wait_for_selector, timeout=15000)
+                await page.wait_for_selector(wait_for_selector, timeout=15000, state='attached')
             else:
                 await page.wait_for_timeout(3000)
             html = await page.content()
@@ -253,7 +257,7 @@ async def _try_local_playwright(url, wait_for_selector=None):
             page = await context.new_page()
             await page.goto(url, wait_until="domcontentloaded", timeout=30000)
             if wait_for_selector:
-                await page.wait_for_selector(wait_for_selector, timeout=10000)
+                await page.wait_for_selector(wait_for_selector, timeout=10000, state='attached')
             else:
                 await page.wait_for_timeout(3000)
             html = await page.content()
@@ -264,6 +268,68 @@ async def _try_local_playwright(url, wait_for_selector=None):
             return html
     except Exception as e:
         _log(f"[Local Playwright] Error: {e}")
+        return None
+
+
+def _try_zenscrape(url, use_browser=True, wait_for_selector=None):
+    if not ZENSCRAPE_API_KEY: return None
+    import requests
+    _log(f"[Zenscrape] Fetching: {url}")
+    params = {"apikey": ZENSCRAPE_API_KEY, "url": url, "premium": "true", "render": "true" if use_browser else "false"}
+    try:
+        response = requests.get("https://app.zenscrape.com/api/v1/get", params=params, timeout=60)
+        if response.status_code in [401, 402, 403, 429]:
+            _log(f"[Zenscrape] Limit/Auth Error ({response.status_code}). Exhausted.")
+            raise APILimitReached("Zenscrape Exhausted")
+        response.raise_for_status()
+        html = response.text
+        if _is_cloudflare_blocked(html):
+            return None
+        return _extract_json_from_html(html, use_browser)
+    except APILimitReached: raise
+    except Exception as e:
+        _log(f"[Zenscrape] Error: {e}")
+        return None
+
+def _try_scrapedo(url, use_browser=True, wait_for_selector=None):
+    if not SCRAPEDO_API_KEY: return None
+    import requests
+    _log(f"[Scrape.do] Fetching: {url}")
+    params = {"token": SCRAPEDO_API_KEY, "url": url, "render": "true" if use_browser else "false", "super": "true"}
+    try:
+        response = requests.get("https://api.scrape.do/", params=params, timeout=60)
+        if response.status_code in [401, 402, 403, 429]:
+            _log(f"[Scrape.do] Limit/Auth Error ({response.status_code}). Exhausted.")
+            raise APILimitReached("Scrape.do Exhausted")
+        response.raise_for_status()
+        html = response.text
+        if _is_cloudflare_blocked(html):
+            return None
+        return _extract_json_from_html(html, use_browser)
+    except APILimitReached: raise
+    except Exception as e:
+        _log(f"[Scrape.do] Error: {e}")
+        return None
+
+def _try_scrapfly(url, use_browser=True, wait_for_selector=None):
+    if not SCRAPFLY_API_KEY: return None
+    import requests
+    _log(f"[Scrapfly] Fetching: {url}")
+    params = {"key": SCRAPFLY_API_KEY, "url": url, "render_js": "true" if use_browser else "false", "asp": "true"}
+    try:
+        response = requests.get("https://api.scrapfly.io/scrape", params=params, timeout=60)
+        if response.status_code in [401, 402, 403, 429]:
+            _log(f"[Scrapfly] Limit/Auth Error ({response.status_code}). Exhausted.")
+            raise APILimitReached("Scrapfly Exhausted")
+        response.raise_for_status()
+        data = response.json()
+        html = data.get("result", {}).get("content", "")
+        if _is_cloudflare_blocked(html):
+            return None
+        return _extract_json_from_html(html, use_browser)
+    except APILimitReached: raise
+    except Exception as e:
+        _log(f"[Scrapfly] Error: {e}")
         return None
 
 async def fetch_html_hybrid(url, wait_for_selector=None):
@@ -303,6 +369,29 @@ async def fetch_html_hybrid(url, wait_for_selector=None):
         html = _try_scrapingbee(url, use_browser=True, wait_for_selector=wait_for_selector)
         if html:
             _log("[Hybrid Fetcher] Successfully fetched via ScrapingBee")
+            return html
+    except APILimitReached: pass
+
+
+    # New Proxies
+    try:
+        html = _try_zenscrape(url, use_browser=True, wait_for_selector=wait_for_selector)
+        if html:
+            _log("[Hybrid Fetcher] Successfully fetched via Zenscrape")
+            return html
+    except APILimitReached: pass
+
+    try:
+        html = _try_scrapedo(url, use_browser=True, wait_for_selector=wait_for_selector)
+        if html:
+            _log("[Hybrid Fetcher] Successfully fetched via Scrape.do")
+            return html
+    except APILimitReached: pass
+
+    try:
+        html = _try_scrapfly(url, use_browser=True, wait_for_selector=wait_for_selector)
+        if html:
+            _log("[Hybrid Fetcher] Successfully fetched via Scrapfly")
             return html
     except APILimitReached: pass
 
@@ -1165,8 +1254,7 @@ async def scrape_anime_schedule():
     """Scrapes the weekly airing schedule from animeschedule.net."""
     _log("[Schedule] Starting hybrid scraper for animeschedule.net")
     
-    # 1. Try Zyte API (Turbo)
-    html = _fetch_with_api_fallback("https://animeschedule.net/")
+    html = await fetch_html_hybrid("https://animeschedule.net/", wait_for_selector=".timetable-column-show")
     if html:
         from bs4 import BeautifulSoup
         soup = BeautifulSoup(html, 'html.parser')
@@ -1189,129 +1277,12 @@ async def scrape_anime_schedule():
                     })
         
         if any(schedule_data.values()):
-            _log(f"[Schedule][Zyte] Successfully parsed schedule")
+            _log(f"[Schedule][Hybrid] Successfully parsed schedule")
             return schedule_data
 
-    # 2. Fallback to Local Playwright (Free)
-    _log("[Schedule][Local] Using local Playwright...")
-    schedule_data = {
-        "monday": [], "tuesday": [], "wednesday": [],
-        "thursday": [], "friday": [], "saturday": [], "sunday": []
-    }
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            timezone_id="UTC"
-        )
-        page = await context.new_page()
+    _log("[Schedule] All methods failed to extract anime schedule.")
+    return None
 
-        async def _route_handler(route):
-            if route.request.resource_type == "image":
-                await route.abort()
-                return
-            await route.continue_()
-
-        await page.route("**/*", _route_handler)
-
-        try:
-            await page.goto("https://animeschedule.net/", wait_until="domcontentloaded")
-            await page.wait_for_selector("h1.timetable-column-date, .timetable-column-show", timeout=15000)
-
-            parsed_schedule = await page.evaluate(
-                """() => {
-                    const normalizeUrl = (value) => {
-                        if (!value) return null;
-                        if (value.startsWith("//")) return `https:${value}`;
-                        if (value.startsWith("http")) return value;
-                        return new URL(value, "https://animeschedule.net/").href;
-                    };
-
-                    const weekdayKeys = {
-                        monday: "monday",
-                        tuesday: "tuesday",
-                        wednesday: "wednesday",
-                        thursday: "thursday",
-                        friday: "friday",
-                        saturday: "saturday",
-                        sunday: "sunday",
-                    };
-
-                    const emptySchedule = {
-                        monday: [],
-                        tuesday: [],
-                        wednesday: [],
-                        thursday: [],
-                        friday: [],
-                        saturday: [],
-                        sunday: [],
-                    };
-
-                    const dayHeaders = Array.from(document.querySelectorAll("h1.timetable-column-date"));
-                    for (const header of dayHeaders) {
-                        const headerLines = (header.innerText || "")
-                            .split(/\\n+/)
-                            .map((line) => line.trim())
-                            .filter(Boolean);
-                        const weekday = (headerLines[headerLines.length - 1] || "").toLowerCase();
-                        const dayKey = weekdayKeys[weekday];
-                        if (!dayKey) continue;
-
-                        let node = header.nextElementSibling;
-                        while (node && !(node.matches && node.matches("h1.timetable-column-date"))) {
-                            if (node.classList && node.classList.contains("timetable-column-show")) {
-                                const title = node.querySelector(".show-title-bar")?.textContent?.trim() || "";
-                                const episode = node.querySelector(".show-episode")?.textContent?.trim() || "";
-                                const timeEl = node.querySelector(".show-air-time");
-                                const airTypeEl = node.querySelector(".air-type-text");
-                                const posterEl = node.querySelector(".show-poster");
-                                const linkEl = node.querySelector("a.show-link");
-
-                                const displayTime = timeEl?.textContent?.trim() || "";
-                                const airType = airTypeEl?.textContent?.trim() || "";
-                                const combinedDisplayTime = [displayTime, airType].filter(Boolean).join(" ");
-
-                                emptySchedule[dayKey].push({
-                                    title,
-                                    episode,
-                                    airing_at: timeEl?.getAttribute("datetime") || "",
-                                    display_time: combinedDisplayTime || displayTime,
-                                    image_url: "",
-                                    show_id: node.getAttribute("showid") || node.getAttribute("route") || "",
-                                    route: node.getAttribute("route") || "",
-                                    air_type: airType,
-                                    status: Array.from(node.classList).find((cls) =>
-                                        ["aired", "airing", "unaired"].includes(cls)
-                                    ) || "",
-                                    episodes: node.getAttribute("episodes") || "",
-                                    popularity: node.getAttribute("popularity") || "",
-                                    media_type: node.getAttribute("mediatype") || "",
-                                    anime_url: normalizeUrl(linkEl?.getAttribute("href")) || "",
-                                    date_label: headerLines.join(" "),
-                                    is_filtered_out: node.classList.contains("filtered-out"),
-                                });
-                            }
-                            node = node.nextElementSibling;
-                        }
-                    }
-
-                    return emptySchedule;
-                }"""
-            )
-
-            for day_name, shows in parsed_schedule.items():
-                schedule_data[day_name] = shows
-                _log(f"[Schedule] Parsed {day_name}: {len(shows)} shows")
-
-            _log("[Schedule] Scraping completed successfully")
-        except Exception as e:
-            _log(f"[Schedule] Global error: {e}")
-        finally:
-            await browser.close()
-
-    return schedule_data
-
-# Re-implementing a simple search CLI for manual testing
 async def main():
     import sys
     import json
