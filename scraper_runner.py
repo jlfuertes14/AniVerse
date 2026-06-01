@@ -216,53 +216,61 @@ def _try_zyte_api(url, use_browser=True, zyte_actions=None):
 def _fetch_with_api_fallback(url, use_browser=True, zyte_actions=None, sapi_instructions=None, wait_for_selector=None):
     """
     Rotational API fetcher.
-    Priority: ScraperAPI -> ScrapingAnt -> WebScraping.AI -> Zyte API -> None (Local Playwright)
-    
-    For AnimePahe URLs, skip straight to Zyte API (ScraperAPI/ScrapingAnt/WebScraping.AI
-    always fail with 500/423 on AnimePahe's Cloudflare, wasting credits and time).
+    Priority: All other APIs -> None (Local Playwright)
     """
     html = None
     is_animepahe = "animepahe" in url or "kwik" in url
     
     if is_animepahe:
-        log("[API Status] AnimePahe/Kwik URL detected — skipping ScraperAPI/ScrapingAnt/WebScraping.AI, going straight to Zyte or Local Playwright")
-    
-    if not is_animepahe:
-        # 1. ScraperAPI
-        try:
-            html = _try_scraper_api(url, use_browser, sapi_instructions, wait_for_selector)
-            if html:
-                log("[API Status] Successfully fetched via ScraperAPI")
-                return html
-        except APILimitReached:
-            pass
-            
-        # 2. ScrapingAnt
-        try:
-            html = _try_scrapingant_api(url, use_browser, wait_for_selector)
-            if html:
-                log("[API Status] Successfully fetched via ScrapingAnt")
-                return html
-        except APILimitReached:
-            pass
-            
-        # 3. WebScraping.AI
-        try:
-            html = _try_webscraping_ai(url, use_browser)
-            if html:
-                log("[API Status] Successfully fetched via WebScraping.AI")
-                return html
-        except APILimitReached:
-            pass
+        log("[API Status] AnimePahe/Kwik URL detected.")
         
-    # 4. Zyte API (only API that works for AnimePahe)
+    # 1. ScrapingAnt
     try:
-        html = _try_zyte_api(url, use_browser, zyte_actions)
+        html = _try_scrapingant_api(url, use_browser, wait_for_selector)
         if html:
-            log("[API Status] Successfully fetched via Zyte API")
+            log("[API Status] Successfully fetched via ScrapingAnt")
             return html
-    except APILimitReached:
-        pass
+    except APILimitReached: pass
+        
+    # 2. WebScraping.AI
+    try:
+        html = _try_webscraping_ai(url, use_browser)
+        if html:
+            log("[API Status] Successfully fetched via WebScraping.AI")
+            return html
+    except APILimitReached: pass
+
+    # 3. ScrapingBee
+    try:
+        html = _try_scrapingbee(url, use_browser, wait_for_selector)
+        if html:
+            log("[API Status] Successfully fetched via ScrapingBee")
+            return html
+    except APILimitReached: pass
+    
+    # 4. Zenscrape
+    try:
+        html = _try_zenscrape(url, use_browser, wait_for_selector)
+        if html:
+            log("[API Status] Successfully fetched via Zenscrape")
+            return html
+    except APILimitReached: pass
+    
+    # 5. Scrape.do
+    try:
+        html = _try_scrapedo(url, use_browser, wait_for_selector)
+        if html:
+            log("[API Status] Successfully fetched via Scrape.do")
+            return html
+    except APILimitReached: pass
+
+    # 6. Scrapfly
+    try:
+        html = _try_scrapfly(url, use_browser, wait_for_selector)
+        if html:
+            log("[API Status] Successfully fetched via Scrapfly")
+            return html
+    except APILimitReached: pass
         
     log("[API Status] All APIs exhausted or failed. Falling back to local Playwright...")
     return None
