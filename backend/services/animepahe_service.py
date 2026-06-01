@@ -30,6 +30,17 @@ _stream_locks: dict[str, asyncio.Lock] = {}
 _embed_locks: dict[str, asyncio.Lock] = {}
 
 
+def _is_kwik_url(url: str | None) -> bool:
+    return bool(url and "kwik." in url.lower())
+
+
+def _is_direct_media_url(url: str | None) -> bool:
+    if not url or _is_kwik_url(url):
+        return False
+    lower = url.lower().split("?", 1)[0]
+    return lower.endswith((".m3u8", ".mp4")) or ".m3u8" in url.lower()
+
+
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -1008,11 +1019,24 @@ async def get_animepahe_stream(session: str, episode_session: str) -> Optional[s
         db = get_db()
         cached = await db["streams"].find_one(
             {"provider_id": session, "episode_id": episode_session, "source": "animepahe"},
-            {"stream_url": 1}
+            {"stream_url": 1, "embed_url": 1}
         )
         if cached and cached.get("stream_url"):
-            print(f"[AnimePahe Service] Reusing cached stream for {session}/{episode_session}")
-            return cached["stream_url"]
+            cached_url = cached["stream_url"]
+            if _is_direct_media_url(cached_url):
+                print(f"[AnimePahe Service] Reusing cached direct stream for {session}/{episode_session}")
+                return cached_url
+
+            if _is_kwik_url(cached_url):
+                print(f"[AnimePahe Service] Ignoring cached blocked Kwik stream for {session}/{episode_session}")
+                await db["streams"].update_one(
+                    {"provider_id": session, "episode_id": episode_session, "source": "animepahe"},
+                    {"$set": {
+                        "stream_url": None,
+                        "embed_url": cached.get("embed_url") or cached_url,
+                        "updated_at": "metadata",
+                    }}
+                )
 
         print(f"[AnimePahe Service] Resolving stream for {session}/{episode_session}")
         try:
@@ -1023,7 +1047,18 @@ async def get_animepahe_stream(session: str, episode_session: str) -> Optional[s
 
             if result and result.get("stream_url"):
                 stream_url = result["stream_url"]
-                # Save it to DB so future calls are instant
+                if _is_kwik_url(stream_url):
+                    await db["streams"].update_one(
+                        {"provider_id": session, "episode_id": episode_session, "source": "animepahe"},
+                        {"$set": {
+                            "stream_url": None,
+                            "embed_url": stream_url,
+                            "updated_at": "metadata",
+                        }}
+                    )
+                    return await resolve_animepahe_embed_stream(stream_url)
+
+                # Save direct media to DB so future calls are instant.
                 await db["streams"].update_one(
                     {"provider_id": session, "episode_id": episode_session, "source": "animepahe"},
                     {"$set": {
@@ -1052,7 +1087,7 @@ async def resolve_animepahe_embed_stream(embed_url: str) -> Optional[str]:
         if cached and cached.get("stream_url"):
             # Check if it's a direct URL (not just the embed link mirrored)
             url = cached["stream_url"]
-            if url and "kwik" not in url.lower() and (url.endswith(".m3u8") or url.endswith(".mp4")):
+            if _is_direct_media_url(url):
                 print(f"[AnimePahe Service] Reusing cached direct stream for {embed_url}")
                 return url
 
@@ -1063,6 +1098,10 @@ async def resolve_animepahe_embed_stream(embed_url: str) -> Optional[str]:
             })
             if result and result.get("stream_url"):
                 direct_url = result["stream_url"]
+                if not _is_direct_media_url(direct_url):
+                    print(f"[AnimePahe Service] Kwik resolver did not return direct media for {embed_url}")
+                    return None
+
                 # Save it to DB
                 await db["streams"].update_many(
                     {"embed_url": embed_url},
