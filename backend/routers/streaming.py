@@ -525,6 +525,23 @@ async def get_episode_stream(
                 }
             )
 
+        if stream_candidates:
+            fallback = _sort_stream_candidates(stream_candidates)[0]
+            src = fallback.get("source")
+            mapping_for_status = locals().get(f"{src}_mapping")
+            print(f"[Streaming] All discoveries skipped. Falling back to DB stream: {src}")
+            return StreamResponse(
+                mal_id=mal_id,
+                ep_number=fallback["episode"],
+                stream_url=fallback.get("stream_url"),
+                embed_url=fallback.get("embed_url"),
+                subtitles=fallback.get("subtitles", []),
+                provider=src,
+                available_episodes=await _get_latest_episode_number(db, mal_id, src),
+                referer_url=fallback.get("referer_url"),
+                catalog_status=_build_catalog_status(mapping_for_status, src),
+            )
+
         raise HTTPException(
             status_code=404,
             detail=f"Episode {ep_number} is not available yet. Latest found on backup source: {available_episodes}"
