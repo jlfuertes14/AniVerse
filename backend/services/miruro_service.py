@@ -162,12 +162,15 @@ async def _run_scraper_subprocess(action: str, params: dict) -> dict | None:
 
 def _sync_run_subprocess(cmd: list) -> dict | None:
     try:
+        env = os.environ.copy()
+        env["SCRAPER_SUBPROCESS"] = "1"
         proc = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
             timeout=120,
-            cwd=os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+            cwd=os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+            env=env
         )
 
         if proc.stderr:

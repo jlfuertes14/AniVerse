@@ -251,9 +251,9 @@ async def _try_browserless(url, wait_for_selector=None):
             browser = await p.chromium.connect_over_cdp(ws_endpoint)
             context = await browser.new_context()
             page = await context.new_page()
-            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
             if wait_for_selector:
-                await page.wait_for_selector(wait_for_selector, timeout=15000, state='attached')
+                await page.wait_for_selector(wait_for_selector, timeout=30000, state='attached')
             else:
                 await page.wait_for_timeout(3000)
             html = await page.content()
@@ -578,12 +578,12 @@ async def animepahe_search(title: str) -> dict | None:
 
         try:
             # Navigate to homepage first (sets DDoS-Guard cookies)
-            await page.goto(ANIMEPAHE_BASE, wait_until="domcontentloaded", timeout=15000)
+            await page.goto(ANIMEPAHE_BASE, wait_until="domcontentloaded", timeout=30000)
             await page.wait_for_timeout(1000)
 
             # Now call the API through the browser context (cookies are set)
             api_url = f"{ANIMEPAHE_BASE}/api?m=search&q={title}"
-            response = await page.goto(api_url, wait_until="domcontentloaded", timeout=15000)
+            response = await page.goto(api_url, wait_until="domcontentloaded", timeout=30000)
 
             # Parse the JSON from the page body
             body_text = await page.inner_text("body")
@@ -621,7 +621,7 @@ async def animepahe_search(title: str) -> dict | None:
 
 async def _animepahe_search_with_page(page, title: str) -> dict | None:
     api_url = f"{ANIMEPAHE_BASE}/api?m=search&q={title}"
-    await page.goto(api_url, wait_until="domcontentloaded", timeout=15000)
+    await page.goto(api_url, wait_until="domcontentloaded", timeout=30000)
 
     body_text = await page.inner_text("body")
     data = json.loads(body_text)
@@ -697,12 +697,12 @@ async def animepahe_get_episodes(session: str, max_pages: int = 100, target_epis
 
         try:
             # CRITICAL: Visit homepage first to set DDoS-Guard cookies
-            await page.goto(ANIMEPAHE_BASE, wait_until="domcontentloaded", timeout=15000)
+            await page.goto(ANIMEPAHE_BASE, wait_until="domcontentloaded", timeout=30000)
             await page.wait_for_timeout(1000)
 
             # Now hit the anime page to get the internal ID
             anime_url = f"{ANIMEPAHE_BASE}/anime/{session}"
-            await page.goto(anime_url, wait_until="domcontentloaded", timeout=15000)
+            await page.goto(anime_url, wait_until="domcontentloaded", timeout=30000)
 
             # Wait for actual content to render
             try:
@@ -725,7 +725,7 @@ async def animepahe_get_episodes(session: str, max_pages: int = 100, target_epis
             # Fetch episodes page by page
             for pg in range(1, max_pages + 1):
                 api_url = f"{ANIMEPAHE_BASE}/api?m=release&id={anime_id}&sort=episode_asc&page={pg}"
-                await page.goto(api_url, wait_until="domcontentloaded", timeout=15000)
+                await page.goto(api_url, wait_until="domcontentloaded", timeout=30000)
 
                 body_text = await page.inner_text("body")
                 try:
@@ -787,10 +787,10 @@ async def animepahe_get_stream(session: str, episode_session: str) -> dict | Non
 
         try:
             # CRITICAL: Visit homepage first to set DDoS-Guard cookies
-            await page.goto(ANIMEPAHE_BASE, wait_until="domcontentloaded", timeout=15000)
+            await page.goto(ANIMEPAHE_BASE, wait_until="domcontentloaded", timeout=30000)
             await page.wait_for_timeout(1000)
 
-            await page.goto(play_url, wait_until="domcontentloaded", timeout=15000)
+            await page.goto(play_url, wait_until="domcontentloaded", timeout=30000)
             await page.wait_for_timeout(1000)
 
             # Extract kwik URLs from the page source
@@ -833,7 +833,7 @@ async def scrape_animepahe_episode(title: str, episode_number: int, session_id: 
         browser, page = await _new_animepahe_page(p)
 
         try:
-            await page.goto(ANIMEPAHE_BASE, wait_until="domcontentloaded", timeout=15000)
+            await page.goto(ANIMEPAHE_BASE, wait_until="domcontentloaded", timeout=30000)
             await page.wait_for_timeout(1000)
 
             if not session_id:
@@ -844,7 +844,7 @@ async def scrape_animepahe_episode(title: str, episode_number: int, session_id: 
                 result["session"] = session_id
 
             anime_url = f"{ANIMEPAHE_BASE}/anime/{session_id}"
-            await page.goto(anime_url, wait_until="domcontentloaded", timeout=15000)
+            await page.goto(anime_url, wait_until="domcontentloaded", timeout=30000)
 
             try:
                 await page.wait_for_selector(".content-wrapper, .anime-content", timeout=10000)
@@ -863,7 +863,7 @@ async def scrape_animepahe_episode(title: str, episode_number: int, session_id: 
             all_episodes = []
             for pg in range(1, 101):
                 api_url = f"{ANIMEPAHE_BASE}/api?m=release&id={anime_id}&sort=episode_asc&page={pg}"
-                await page.goto(api_url, wait_until="domcontentloaded", timeout=15000)
+                await page.goto(api_url, wait_until="domcontentloaded", timeout=30000)
 
                 body_text = await page.inner_text("body")
                 data = json.loads(body_text)
@@ -896,7 +896,7 @@ async def scrape_animepahe_episode(title: str, episode_number: int, session_id: 
                 )
 
             play_url = f"{ANIMEPAHE_BASE}/play/{session_id}/{target_episode['session']}"
-            await page.goto(play_url, wait_until="domcontentloaded", timeout=15000)
+            await page.goto(play_url, wait_until="domcontentloaded", timeout=30000)
             await page.wait_for_timeout(1000)
 
             play_content = await page.content()
@@ -1374,12 +1374,12 @@ async def shiroko_scrape_episode(anilist_id: int, episode_number: int) -> dict |
         page.on("response", handle_response)
 
         try:
-            await page.goto(watch_url, wait_until="domcontentloaded", timeout=45000)
+            await page.goto(watch_url, wait_until="domcontentloaded", timeout=60000)
             
             # Wait for video player to initialize
             try:
                 # The video player or an iframe usually appears
-                await page.wait_for_selector("video, iframe, .art-video-player, #player", timeout=15000)
+                await page.wait_for_selector("video, iframe, .art-video-player, #player", timeout=30000)
                 await page.wait_for_timeout(5000) # Give it some time to fetch the m3u8
             except Exception as e:
                 _log(f"[Shiroko] Timeout waiting for player on {watch_url}: {e}")
@@ -1586,12 +1586,12 @@ async def miruro_scrape_episode(anilist_id: int, episode_number: int) -> dict | 
         page.on("response", handle_response)
 
         try:
-            await page.goto(watch_url, wait_until="domcontentloaded", timeout=45000)
+            await page.goto(watch_url, wait_until="domcontentloaded", timeout=60000)
             
             # Wait for video player to initialize
             try:
                 # The video player or an iframe usually appears
-                await page.wait_for_selector("video, iframe, .vidstack-player", timeout=15000)
+                await page.wait_for_selector("video, iframe, .vidstack-player", timeout=30000)
                 await page.wait_for_timeout(5000) # Give it some time to fetch the m3u8
             except Exception as e:
                 _log(f"[Miruro] Timeout waiting for player on {watch_url}: {e}")

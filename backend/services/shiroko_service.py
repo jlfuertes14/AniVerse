@@ -100,12 +100,22 @@ def _run_shiroko_scraper(anilist_id: int, episode_number: int) -> Optional[Dict[
         })
     ]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        import os
+        env = os.environ.copy()
+        env["SCRAPER_SUBPROCESS"] = "1"
+        result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+        
+        if result.stderr:
+            for line in result.stderr.strip().split("\n"):
+                if line.strip():
+                    print(line.strip())
+                    
         lines = result.stdout.strip().split("\n")
         if not lines or not lines[-1].strip(): return None
         data = json.loads(lines[-1])
         return data if data else None
-    except Exception:
+    except Exception as e:
+        print(f"[Shiroko] Subprocess error: {e}")
         return None
 
 def is_shiroko_refresh_in_progress(mal_id: int) -> bool:

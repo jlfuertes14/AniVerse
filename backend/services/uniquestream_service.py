@@ -74,16 +74,20 @@ def _run_uniquestream_scraper(title: str, episode_number: int) -> Optional[Dict[
         })
     ]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        import os
+        env = os.environ.copy()
+        env["SCRAPER_SUBPROCESS"] = "1"
+        result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+        
+        if result.stderr:
+            for line in result.stderr.strip().split("\n"):
+                if line.strip():
+                    print(line.strip())
+                    
         lines = result.stdout.strip().split("\n")
         if not lines or not lines[-1].strip(): return None
         data = json.loads(lines[-1])
         return data if data else None
-    except subprocess.CalledProcessError as e:
-        print(f"[Uniquestream] Subprocess failed with exit code {e.returncode}")
-        if e.stdout: print(f"[Uniquestream] STDOUT: {e.stdout}")
-        if e.stderr: print(f"[Uniquestream] STDERR: {e.stderr}")
-        return None
     except Exception as e:
         print(f"[Uniquestream] Subprocess error: {e}")
         return None
