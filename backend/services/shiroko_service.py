@@ -16,7 +16,7 @@ async def refresh_shiroko_catalog(mal_id: int, episode_number: int):
     # Mark as refreshing
     await db["provider_mappings"].update_one(
         {"mal_id": mal_id, "provider": "shiroko"},
-        {"$set": {"status": "refreshing", "last_catalog_check_at": datetime.now(timezone.utc).isoformat() + "Z"}},
+        {"$set": {"status": "refreshing", "last_catalog_check_at": datetime.utcnow().isoformat() + "Z"}},
         upsert=True
     )
     
@@ -64,7 +64,7 @@ async def refresh_shiroko_catalog(mal_id: int, episode_number: int):
                 {"mal_id": mal_id, "provider": "shiroko"},
                 {"$set": {
                     "status": "idle",
-                    "last_success_at": datetime.now(timezone.utc).isoformat() + "Z",
+                    "last_success_at": datetime.utcnow().isoformat() + "Z",
                     "latest_episode": episode_number
                 }}
             )
