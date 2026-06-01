@@ -42,6 +42,12 @@ os.environ["SCRAPER_SUBPROCESS"] = "1"
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
+PLAYWRIGHT_LAUNCH_ARGS = [
+    "--no-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-setuid-sandbox",
+]
+
 
 # ── MongoDB Connectivity (Cache Layer) ─────────────────────────
 import pymongo
@@ -357,7 +363,7 @@ async def reanime_search(title: str, target_anilist_id: int = None) -> dict | No
     # 2. Fallback to Local Playwright (Free)
     log(f"[Re:ANIME][Local] Falling back to local Playwright...")
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        browser = await p.chromium.launch(headless=True, args=PLAYWRIGHT_LAUNCH_ARGS)
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
             viewport={"width": 1280, "height": 720}
@@ -516,7 +522,7 @@ async def reanime_scrape_episode(slug: str, episode_number: int) -> dict | None:
     # 3. Fallback to Local Playwright with extended timeout + retry
     log(f"[Re:ANIME][Local] Using local Playwright...")
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        browser = await p.chromium.launch(headless=True, args=PLAYWRIGHT_LAUNCH_ARGS)
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
         )
@@ -685,7 +691,7 @@ def scrape_animepahe_episode_sync(title: str, episode_number: int, session_id: s
     }
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(headless=True, args=PLAYWRIGHT_LAUNCH_ARGS)
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
         )
@@ -847,7 +853,7 @@ def scrape_animepahe_catalog_sync(title: str, session_id: str | None = None, off
     }
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(headless=True, args=PLAYWRIGHT_LAUNCH_ARGS)
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
         )
@@ -971,7 +977,7 @@ async def animepahe_get_stream(session: str, episode_session: str) -> dict | Non
     # 2. Fallback to Local Playwright (Free)
     log(f"[AnimePahe][Local] Using local Playwright...")
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        browser = await p.chromium.launch(headless=True, args=PLAYWRIGHT_LAUNCH_ARGS)
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/131.0.0.0 Safari/537.36"
         )
@@ -1031,7 +1037,7 @@ async def resolve_kwik_stream(url: str) -> dict | None:
             request_candidates.append(candidate)
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        browser = await p.chromium.launch(headless=True, args=PLAYWRIGHT_LAUNCH_ARGS)
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
         )

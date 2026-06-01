@@ -103,7 +103,7 @@ async def scrape_miruro_episode(anilist_id: int, mal_id: int, ep_number: int):
             "episode_number": ep_number
         })
         
-        if result and result.get("stream_url"):
+        if result and (result.get("stream_url") or result.get("embed_url")):
             db = get_db()
             
             # Update stream record
@@ -115,6 +115,7 @@ async def scrape_miruro_episode(anilist_id: int, mal_id: int, ep_number: int):
                     "episode": ep_number,
                     "source": "miruro",
                     "stream_url": result.get("stream_url"),
+                    "embed_url": result.get("embed_url"),
                     "updated_at": "resolved",
                     "referer_url": result.get("referer_url"),
                     "subtitles": result.get("subtitles", [])

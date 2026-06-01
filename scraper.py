@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 import json
 import sys
 import re
@@ -17,7 +17,13 @@ from playwright.async_api import async_playwright
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
-# ── MongoDB Connectivity (Cache Layer) ─────────────────────────
+PLAYWRIGHT_LAUNCH_ARGS = [
+    "--no-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-setuid-sandbox",
+]
+
+# â”€â”€ MongoDB Connectivity (Cache Layer) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 import pymongo
 from pymongo import MongoClient
 
@@ -31,7 +37,7 @@ def get_db():
         client = MongoClient(MONGODB_URI)
         return client[MONGODB_DB]
     except Exception as e:
-        _log(f"[DB] Connection Error: {e}")
+        print(f"[DB] Connection Error: {e}", file=sys.stderr)
         return None
 
 db = get_db()
@@ -46,7 +52,7 @@ def _log(msg: str):
     else:
         print(msg)
 
-# ── API Scraper Integrations (Rotational Fallback) ──────────────────────────
+# â”€â”€ API Scraper Integrations (Rotational Fallback) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 ZYTE_API_KEY = os.environ.get("ZYTE_API_KEY")
 SCRAPER_API_KEY = os.environ.get("SCRAPER_API_KEY")
 SCRAPINGANT_API_KEY = os.environ.get("SCRAPINGANT_API_KEY")
@@ -250,7 +256,7 @@ async def _try_local_playwright(url, wait_for_selector=None):
     _log(f"[Local Playwright] Fetching: {url}")
     try:
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
+            browser = await p.chromium.launch(headless=True, args=PLAYWRIGHT_LAUNCH_ARGS)
             context = await browser.new_context(
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
             )
@@ -415,7 +421,7 @@ def _fetch_with_api_fallback(url, use_browser=True, zyte_actions=None, sapi_inst
     is_animepahe = "animepahe" in url or "kwik" in url
     
     if is_animepahe:
-        _log("[API Status] AnimePahe/Kwik URL detected — skipping ScraperAPI/ScrapingAnt/WebScraping.AI, going straight to Zyte or Local Playwright")
+        _log("[API Status] AnimePahe/Kwik URL detected â€” skipping ScraperAPI/ScrapingAnt/WebScraping.AI, going straight to Zyte or Local Playwright")
     
     if not is_animepahe:
         # 1. ScraperAPI
@@ -460,15 +466,15 @@ def _fetch_with_api_fallback(url, use_browser=True, zyte_actions=None, sapi_inst
 
 
 
-# ═══════════════════════════════════════════════════════════════
-#  AnimePahe Scraper (Playwright — bypasses DDoS-Guard)
-# ═══════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+#  AnimePahe Scraper (Playwright â€” bypasses DDoS-Guard)
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 ANIMEPAHE_BASE = "https://animepahe.pw"
 
 
 async def _new_animepahe_page(playwright):
-    browser = await playwright.chromium.launch(headless=True)
+    browser = await playwright.chromium.launch(headless=True, args=PLAYWRIGHT_LAUNCH_ARGS)
     context = await browser.new_context(
         user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
     )
@@ -550,7 +556,7 @@ async def animepahe_search(title: str) -> dict | None:
     # 2. Fallback to Local Playwright (Free)
     _log(f"[AnimePahe][Local] Using local Playwright...")
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        browser = await p.chromium.launch(headless=True, args=PLAYWRIGHT_LAUNCH_ARGS)
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
         )
@@ -669,7 +675,7 @@ async def animepahe_get_episodes(session: str, max_pages: int = 100, target_epis
     _log(f"[AnimePahe][Local] Using local Playwright...")
     all_episodes = []
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        browser = await p.chromium.launch(headless=True, args=PLAYWRIGHT_LAUNCH_ARGS)
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
         )
@@ -759,7 +765,7 @@ async def animepahe_get_stream(session: str, episode_session: str) -> dict | Non
     # 2. Fallback to Local Playwright (Free)
     _log(f"[AnimePahe][Local] Using local Playwright...")
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        browser = await p.chromium.launch(headless=True, args=PLAYWRIGHT_LAUNCH_ARGS)
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
         )
@@ -902,7 +908,7 @@ async def scrape_animepahe_episode(title: str, episode_number: int, session_id: 
 
 async def scrape_animepahe(title: str, max_episodes: int = 0, session_id: str = None, target_episode: int = None):
     """
-    Full AnimePahe pipeline: search (if no session_id) → episodes → streams.
+    Full AnimePahe pipeline: search (if no session_id) â†’ episodes â†’ streams.
     Returns structured data ready for DB insertion.
     
     Args:
@@ -979,7 +985,7 @@ async def scrape_animepahe_latest(pages: int = 3) -> list:
     _log(f"[AnimePahe][Local] Using local Playwright...")
     all_releases = []
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        browser = await p.chromium.launch(headless=True, args=PLAYWRIGHT_LAUNCH_ARGS)
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
         )
@@ -1081,7 +1087,7 @@ async def scrape_reanime_latest() -> list:
     # 2. Fallback to Local Playwright (Free)
     _log("[Re:ANIME][Local] Using local Playwright...")
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        browser = await p.chromium.launch(headless=True, args=PLAYWRIGHT_LAUNCH_ARGS)
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
         )
@@ -1222,9 +1228,9 @@ async def scrape_reanime_latest() -> list:
     return latest_releases
 
 
-# ═══════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #  CLI Test Interface
-# ═══════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "animepahe":
@@ -1246,9 +1252,9 @@ if __name__ == "__main__":
     else:
         _log("Usage: python scraper.py <animepahe|latest|reanime_latest> [params]")
 
-# ═══════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #  AnimeSchedule.net Scraper
-# ═══════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 async def scrape_anime_schedule():
     """Scrapes the weekly airing schedule from animeschedule.net."""
@@ -1307,9 +1313,9 @@ if __name__ == "__main__":
     asyncio.run(main())
 
 
-# ═══════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #  Shiroko Scraper
-# ═══════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 async def shiroko_scrape_episode(anilist_id: int, episode_number: int) -> dict | None:
     """
@@ -1325,10 +1331,11 @@ async def shiroko_scrape_episode(anilist_id: int, episode_number: int) -> dict |
     # Check cache first
     if db is not None:
         cached = db.streams.find_one({"referer_url": watch_url, "provider": "shiroko"})
-        if cached and cached.get("stream_url"):
+        if cached and (cached.get("stream_url") or cached.get("embed_url")):
             _log(f"[Shiroko][Cache] Hit for: {watch_url}")
             return {
-                "stream_url": cached["stream_url"],
+                "stream_url": cached.get("stream_url"),
+                "embed_url": cached.get("embed_url"),
                 "provider": "shiroko",
                 "referer_url": watch_url,
                 "available_episodes": cached.get("available_episodes", episode_number)
@@ -1336,9 +1343,10 @@ async def shiroko_scrape_episode(anilist_id: int, episode_number: int) -> dict |
 
     _log(f"[Shiroko][Local] Using local Playwright for network interception...")
     m3u8_candidates = []
+    iframe_matches = []
     
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        browser = await p.chromium.launch(headless=True, args=PLAYWRIGHT_LAUNCH_ARGS)
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
         )
@@ -1398,13 +1406,21 @@ async def shiroko_scrape_episode(anilist_id: int, episode_number: int) -> dict |
             "provider": "shiroko",
             "referer_url": watch_url
         }
+
+    if iframe_matches:
+        _log(f"[Shiroko] Falling back to iframe embed: {iframe_matches[0]}")
+        return {
+            "embed_url": iframe_matches[0],
+            "provider": "shiroko",
+            "referer_url": watch_url,
+            "available_episodes": episode_number
+        }
     
     return None
 
 import asyncio
 from bs4 import BeautifulSoup
 from urllib.parse import quote_plus
-from scraper import fetch_html_hybrid, _log
 
 async def animeverse_scrape_episode(title: str, episode_number: int) -> dict | None:
     """
@@ -1502,103 +1518,114 @@ async def uniquestream_scrape_episode(title: str, episode_number: int) -> dict |
         
     return None
 
- 
-  
- #   � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " �  
- #     M i r u r o   S c r a p e r  
- #   � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " � � " �  
-  
- a s y n c   d e f   m i r u r o _ s c r a p e _ e p i s o d e ( a n i l i s t _ i d :   i n t ,   e p i s o d e _ n u m b e r :   i n t )   - >   d i c t   |   N o n e :  
-         " " "  
-         E x t r a c t   s t r e a m   U R L   f o r   a   M i r u r o   e p i s o d e .  
-         S i n c e   M i r u r o   d e c r y p t s   t h e   s t r e a m   U R L   i n   t h e   b r o w s e r   a n d   f e t c h e s   i t   v i a   X H R ,  
-         w e   M U S T   u s e   L o c a l   P l a y w r i g h t   n e t w o r k   i n t e r c e p t i o n   t o   c a p t u r e   t h e   . m 3 u 8   l i n k .  
-         " " "  
-         f r o m   p l a y w r i g h t . a s y n c _ a p i   i m p o r t   a s y n c _ p l a y w r i g h t  
-         i m p o r t   r e  
-          
-         w a t c h _ u r l   =   f " h t t p s : / / w w w . m i r u r o . t o / w a t c h ? i d = { a n i l i s t _ i d } & e p = { e p i s o d e _ n u m b e r } "  
-         _ l o g ( f " [ M i r u r o ]   S t a r t i n g   s t r e a m   e x t r a c t i o n :   { w a t c h _ u r l } " )  
-  
-         #   C h e c k   c a c h e   f i r s t  
-         i f   d b   i s   n o t   N o n e :  
-                 c a c h e d   =   d b . s t r e a m s . f i n d _ o n e ( { " r e f e r e r _ u r l " :   w a t c h _ u r l ,   " p r o v i d e r " :   " m i r u r o " } )  
-                 i f   c a c h e d   a n d   c a c h e d . g e t ( " s t r e a m _ u r l " ) :  
-                         _ l o g ( f " [ M i r u r o ] [ C a c h e ]   H i t   f o r :   { w a t c h _ u r l } " )  
-                         r e t u r n   {  
-                                 " s t r e a m _ u r l " :   c a c h e d [ " s t r e a m _ u r l " ] ,  
-                                 " p r o v i d e r " :   " m i r u r o " ,  
-                                 " r e f e r e r _ u r l " :   w a t c h _ u r l ,  
-                                 " a v a i l a b l e _ e p i s o d e s " :   c a c h e d . g e t ( " a v a i l a b l e _ e p i s o d e s " ,   e p i s o d e _ n u m b e r )  
-                         }  
-  
-         _ l o g ( f " [ M i r u r o ] [ L o c a l ]   U s i n g   l o c a l   P l a y w r i g h t   f o r   n e t w o r k   i n t e r c e p t i o n . . . " )  
-         m 3 u 8 _ c a n d i d a t e s   =   [ ]  
-          
-         a s y n c   w i t h   a s y n c _ p l a y w r i g h t ( )   a s   p :  
-                 b r o w s e r   =   a w a i t   p . c h r o m i u m . l a u n c h ( h e a d l e s s = T r u e )  
-                 c o n t e x t   =   a w a i t   b r o w s e r . n e w _ c o n t e x t (  
-                         u s e r _ a g e n t = " M o z i l l a / 5 . 0   ( W i n d o w s   N T   1 0 . 0 ;   W i n 6 4 ;   x 6 4 )   A p p l e W e b K i t / 5 3 7 . 3 6   ( K H T M L ,   l i k e   G e c k o )   C h r o m e / 1 3 1 . 0 . 0 . 0   S a f a r i / 5 3 7 . 3 6 "  
-                 )  
-                 p a g e   =   a w a i t   c o n t e x t . n e w _ p a g e ( )  
-  
-                 d e f   h a n d l e _ r e s p o n s e ( r e s ) :  
-                         u r l _ l o w e r   =   r e s . u r l . l o w e r ( )  
-                         i f   " . m 3 u 8 "   i n   u r l _ l o w e r :  
-                                 m 3 u 8 _ c a n d i d a t e s . a p p e n d ( r e s . u r l )  
-  
-                 p a g e . o n ( " r e s p o n s e " ,   h a n d l e _ r e s p o n s e )  
-  
-                 t r y :  
-                         a w a i t   p a g e . g o t o ( w a t c h _ u r l ,   w a i t _ u n t i l = " d o m c o n t e n t l o a d e d " ,   t i m e o u t = 4 5 0 0 0 )  
-                          
-                         #   W a i t   f o r   v i d e o   p l a y e r   t o   i n i t i a l i z e  
-                         t r y :  
-                                 #   T h e   v i d e o   p l a y e r   o r   a n   i f r a m e   u s u a l l y   a p p e a r s  
-                                 a w a i t   p a g e . w a i t _ f o r _ s e l e c t o r ( " v i d e o ,   i f r a m e ,   . v i d s t a c k - p l a y e r " ,   t i m e o u t = 1 5 0 0 0 )  
-                                 a w a i t   p a g e . w a i t _ f o r _ t i m e o u t ( 5 0 0 0 )   #   G i v e   i t   s o m e   t i m e   t o   f e t c h   t h e   m 3 u 8  
-                         e x c e p t   E x c e p t i o n   a s   e :  
-                                 _ l o g ( f " [ M i r u r o ]   T i m e o u t   w a i t i n g   f o r   p l a y e r   o n   { w a t c h _ u r l } :   { e } " )  
-  
-                         #   A l s o   c h e c k   D O M   f o r   a n y   e x p l i c i t   e m b e d s   ( e . g .   i f   t h e y   f a l l b a c k   t o   a n   i f r a m e )  
-                         h t m l   =   a w a i t   p a g e . c o n t e n t ( )  
-                         i f r a m e _ m a t c h e s   =   r e . f i n d a l l ( r ' < i f r a m e [ ^ > ] + s r c = [ " \ ' ] ( [ ^ " \ ' ] + ) [ " \ ' ] ' ,   h t m l )  
-                          
-                         #   C h e c k   s e r v e r s   t o   c l i c k   t h r o u g h   i f   f i r s t   o n e   f a i l s  
-                         i f   n o t   m 3 u 8 _ c a n d i d a t e s :  
-                                 _ l o g ( f " [ M i r u r o ]   N o   . m 3 u 8   f o u n d   o n   i n i t i a l   l o a d .   T r y i n g   t o   c l i c k   o t h e r   s e r v e r s . . . " )  
-                                 s e r v e r s   =   a w a i t   p a g e . q u e r y _ s e l e c t o r _ a l l ( " d i v . s e r v e r - i t e m ,   b u t t o n . s e r v e r - b t n ,   l i . s e r v e r " )  
-                                 f o r   s e r v e r   i n   s e r v e r s :  
-                                         t r y :  
-                                                 a w a i t   s e r v e r . c l i c k ( )  
-                                                 a w a i t   p a g e . w a i t _ f o r _ t i m e o u t ( 3 0 0 0 )  
-                                                 i f   m 3 u 8 _ c a n d i d a t e s :  
-                                                         _ l o g ( f " [ M i r u r o ]   F o u n d   . m 3 u 8   a f t e r   c l i c k i n g   a   s e r v e r ! " )  
-                                                         b r e a k  
-                                         e x c e p t :  
-                                                 p a s s  
-  
-                 e x c e p t   E x c e p t i o n   a s   e :  
-                         _ l o g ( f " [ M i r u r o ]   S c r a p e   e r r o r :   { e } " )  
-                 f i n a l l y :  
-                         a w a i t   b r o w s e r . c l o s e ( )  
-  
-         i f   m 3 u 8 _ c a n d i d a t e s :  
-                 #   P r i o r i t i z e   t h e   a c t u a l   p l a y l i s t   m 3 u 8  
-                 s e l e c t e d _ m 3 u 8   =   m 3 u 8 _ c a n d i d a t e s [ 0 ]  
-                 f o r   u r l   i n   m 3 u 8 _ c a n d i d a t e s :  
-                         i f   " m a s t e r . m 3 u 8 "   i n   u r l   o r   " p l . m 3 u 8 "   i n   u r l :  
-                                 s e l e c t e d _ m 3 u 8   =   u r l  
-                                 b r e a k  
-                                  
-                 r e t u r n   {  
-                         " s t r e a m _ u r l " :   s e l e c t e d _ m 3 u 8 ,  
-                         " e m b e d _ u r l " :   i f r a m e _ m a t c h e s [ 0 ]   i f   i f r a m e _ m a t c h e s   e l s e   N o n e ,  
-                         " a l l _ q u a l i t i e s " :   l i s t ( s e t ( m 3 u 8 _ c a n d i d a t e s ) ) ,  
-                         " p r o v i d e r " :   " m i r u r o " ,  
-                         " r e f e r e r _ u r l " :   w a t c h _ u r l  
-                 }  
-  
-         _ l o g ( f " [ M i r u r o ]   F a i l e d   t o   e x t r a c t   s t r e a m   f o r   { w a t c h _ u r l } " )  
-         r e t u r n   N o n e  
- 
+
+
+# â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" 
+#  Miruro Scraper
+# â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" â" 
+
+async def miruro_scrape_episode(anilist_id: int, episode_number: int) -> dict | None:
+    """
+    Extract stream URL for a Miruro episode.
+    Since Miruro decrypts the stream URL in the browser and fetches it via XHR,
+    we MUST use Local Playwright network interception to capture the .m3u8 link.
+    """
+    from playwright.async_api import async_playwright
+    import re
+    
+    watch_url = f"https://www.miruro.to/watch?id={anilist_id}&ep={episode_number}"
+    _log(f"[Miruro] Starting stream extraction: {watch_url}")
+
+    # Check cache first
+    if db is not None:
+        cached = db.streams.find_one({"referer_url": watch_url, "provider": "miruro"})
+        if cached and (cached.get("stream_url") or cached.get("embed_url")):
+            _log(f"[Miruro][Cache] Hit for: {watch_url}")
+            return {
+                "stream_url": cached.get("stream_url"),
+                "embed_url": cached.get("embed_url"),
+                "provider": "miruro",
+                "referer_url": watch_url,
+                "available_episodes": cached.get("available_episodes", episode_number)
+            }
+
+    _log(f"[Miruro][Local] Using local Playwright for network interception...")
+    m3u8_candidates = []
+    iframe_matches = []
+    
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True, args=PLAYWRIGHT_LAUNCH_ARGS)
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        )
+        page = await context.new_page()
+
+        def handle_response(res):
+            url_lower = res.url.lower()
+            if ".m3u8" in url_lower:
+                m3u8_candidates.append(res.url)
+
+        page.on("response", handle_response)
+
+        try:
+            await page.goto(watch_url, wait_until="domcontentloaded", timeout=45000)
+            
+            # Wait for video player to initialize
+            try:
+                # The video player or an iframe usually appears
+                await page.wait_for_selector("video, iframe, .vidstack-player", timeout=15000)
+                await page.wait_for_timeout(5000) # Give it some time to fetch the m3u8
+            except Exception as e:
+                _log(f"[Miruro] Timeout waiting for player on {watch_url}: {e}")
+
+            # Also check DOM for any explicit embeds (e.g. if they fallback to an iframe)
+            html = await page.content()
+            iframe_matches = re.findall(r'<iframe[^>]+src=["\']([^"\']+)["\']', html)
+            
+            # Check servers to click through if first one fails
+            if not m3u8_candidates:
+                _log(f"[Miruro] No .m3u8 found on initial load. Trying to click other servers...")
+                servers = await page.query_selector_all("div.server-item, button.server-btn, li.server")
+                for server in servers:
+                    try:
+                        await server.click()
+                        await page.wait_for_timeout(3000)
+                        if m3u8_candidates:
+                            _log(f"[Miruro] Found .m3u8 after clicking a server!")
+                            break
+                    except:
+                        pass
+
+        except Exception as e:
+            _log(f"[Miruro] Scrape error: {e}")
+        finally:
+            await browser.close()
+
+    if m3u8_candidates:
+        # Prioritize the actual playlist m3u8
+        selected_m3u8 = m3u8_candidates[0]
+        for url in m3u8_candidates:
+            if "master.m3u8" in url or "pl.m3u8" in url:
+                selected_m3u8 = url
+                break
+                
+        return {
+            "stream_url": selected_m3u8,
+            "embed_url": iframe_matches[0] if iframe_matches else None,
+            "all_qualities": list(set(m3u8_candidates)),
+            "provider": "miruro",
+            "referer_url": watch_url
+        }
+
+    if iframe_matches:
+        _log(f"[Miruro] Falling back to iframe embed: {iframe_matches[0]}")
+        return {
+            "embed_url": iframe_matches[0],
+            "provider": "miruro",
+            "referer_url": watch_url,
+            "available_episodes": episode_number
+        }
+
+    _log(f"[Miruro] Failed to extract stream for {watch_url}")
+    return None
+
