@@ -46,6 +46,11 @@ function isHlsStream(url?: string) {
     return lower.includes(".m3u8") || lower.includes("mpegurl");
 }
 
+function isValidEmbedUrl(url?: string) {
+    if (!url) return false;
+    return !url.toLowerCase().includes("theanimecommunity.com/embed-widget");
+}
+
 export default function TheaterPlayer({
     embedUrl,
     streamUrl,
@@ -95,7 +100,7 @@ export default function TheaterPlayer({
     }, [forceDirectPlayback, streamReferer, subtitles]);
 
     const useHlsPlayback = useMemo(() => isHlsStream(streamUrl), [streamUrl]);
-    const hasEmbedPlayback = Boolean(embedUrl);
+    const hasEmbedPlayback = isValidEmbedUrl(embedUrl);
     const hasDirectPlayback = Boolean(resolvedStreamUrl);
     const preferEmbedPlayback = (provider === "animepahe" || provider === "reanime") && hasEmbedPlayback;
     const activePlaybackMode =
@@ -350,7 +355,7 @@ export default function TheaterPlayer({
                 {errorMessage && (
                     <div className="theater-error">
                         <p>{errorMessage}</p>
-                        {embedUrl && (
+                        {hasEmbedPlayback && (
                             <button
                                 type="button"
                                 className="theater-error-link"

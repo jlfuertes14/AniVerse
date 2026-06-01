@@ -86,6 +86,20 @@ def _is_cloudflare_blocked(html) -> bool:
     html_lower = html.lower()
     return "just a moment..." in html_lower or "cf-browser-verification" in html_lower or "ddos-guard" in html_lower
 
+def _is_valid_embed_url(url: str | None) -> bool:
+    if not url:
+        return False
+    lower = url.lower()
+    if "theanimecommunity.com/embed-widget" in lower:
+        return False
+    return lower.startswith(("http://", "https://"))
+
+def _first_valid_embed_url(urls: list[str]) -> str | None:
+    for url in urls:
+        if _is_valid_embed_url(url):
+            return url
+    return None
+
 def _try_scraper_api(url, use_browser=True, sapi_instructions=None, wait_for_selector=None):
     if not SCRAPER_API_KEY: return None
     import requests
@@ -1371,7 +1385,10 @@ async def shiroko_scrape_episode(anilist_id: int, episode_number: int) -> dict |
                 _log(f"[Shiroko] Timeout waiting for player on {watch_url}: {e}")
 
             html = await page.content()
-            iframe_matches = re.findall(r'''<iframe[^>]+src=["']([^"']+)["']''', html)
+            iframe_matches = [
+                src for src in re.findall(r'''<iframe[^>]+src=["']([^"']+)["']''', html)
+                if _is_valid_embed_url(src)
+            ]
             
             if not m3u8_candidates:
                 _log(f"[Shiroko] No .m3u8 found on initial load. Trying to click other servers...")
@@ -1401,16 +1418,17 @@ async def shiroko_scrape_episode(anilist_id: int, episode_number: int) -> dict |
                 
         return {
             "stream_url": selected_m3u8,
-            "embed_url": iframe_matches[0] if iframe_matches else None,
+            "embed_url": _first_valid_embed_url(iframe_matches),
             "all_qualities": list(set(m3u8_candidates)),
             "provider": "shiroko",
             "referer_url": watch_url
         }
 
-    if iframe_matches:
-        _log(f"[Shiroko] Falling back to iframe embed: {iframe_matches[0]}")
+    valid_embed_url = _first_valid_embed_url(iframe_matches)
+    if valid_embed_url:
+        _log(f"[Shiroko] Falling back to iframe embed: {valid_embed_url}")
         return {
-            "embed_url": iframe_matches[0],
+            "embed_url": valid_embed_url,
             "provider": "shiroko",
             "referer_url": watch_url,
             "available_episodes": episode_number
@@ -1580,7 +1598,10 @@ async def miruro_scrape_episode(anilist_id: int, episode_number: int) -> dict | 
 
             # Also check DOM for any explicit embeds (e.g. if they fallback to an iframe)
             html = await page.content()
-            iframe_matches = re.findall(r'<iframe[^>]+src=["\']([^"\']+)["\']', html)
+            iframe_matches = [
+                src for src in re.findall(r'<iframe[^>]+src=["\']([^"\']+)["\']', html)
+                if _is_valid_embed_url(src)
+            ]
             
             # Check servers to click through if first one fails
             if not m3u8_candidates:
@@ -1611,16 +1632,17 @@ async def miruro_scrape_episode(anilist_id: int, episode_number: int) -> dict | 
                 
         return {
             "stream_url": selected_m3u8,
-            "embed_url": iframe_matches[0] if iframe_matches else None,
+            "embed_url": _first_valid_embed_url(iframe_matches),
             "all_qualities": list(set(m3u8_candidates)),
             "provider": "miruro",
             "referer_url": watch_url
         }
 
-    if iframe_matches:
-        _log(f"[Miruro] Falling back to iframe embed: {iframe_matches[0]}")
+    valid_embed_url = _first_valid_embed_url(iframe_matches)
+    if valid_embed_url:
+        _log(f"[Miruro] Falling back to iframe embed: {valid_embed_url}")
         return {
-            "embed_url": iframe_matches[0],
+            "embed_url": valid_embed_url,
             "provider": "miruro",
             "referer_url": watch_url,
             "available_episodes": episode_number

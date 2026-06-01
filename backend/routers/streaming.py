@@ -35,6 +35,15 @@ SOURCE_PRIORITY = {
 }
 
 
+def _is_valid_embed_url(url: str | None) -> bool:
+    if not url:
+        return False
+    lower = url.lower()
+    if "theanimecommunity.com/embed-widget" in lower:
+        return False
+    return lower.startswith(("http://", "https://"))
+
+
 async def _resolve_and_cache_embed_stream(db, stream_id, embed_url: str):
     try:
         direct_stream_url = await resolve_animepahe_embed_stream(embed_url)
@@ -182,6 +191,8 @@ async def get_episode_stream(
         if stream_data.get("stream_url") or stream_data.get("embed_url"):
             s_url = stream_data.get("stream_url")
             e_url = stream_data.get("embed_url")
+            if e_url and not _is_valid_embed_url(e_url):
+                e_url = None
             referer_url = stream_data.get("referer_url")
             
             if s_url and "kwik" in s_url:
@@ -547,7 +558,7 @@ async def get_episode_stream(
                 mal_id=mal_id,
                 ep_number=fallback["episode"],
                 stream_url=fallback.get("stream_url"),
-                embed_url=fallback.get("embed_url"),
+                embed_url=fallback.get("embed_url") if _is_valid_embed_url(fallback.get("embed_url")) else None,
                 subtitles=fallback.get("subtitles", []),
                 provider=src,
                 available_episodes=await _get_latest_episode_number(db, mal_id, src),
