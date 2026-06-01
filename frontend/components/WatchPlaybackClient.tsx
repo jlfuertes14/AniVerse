@@ -159,20 +159,18 @@ export default function WatchPlaybackClient({
                         </div>
                         <div className="watch-meta-chip server-selector">
                             <span className="icon">SERVER:</span>
-                            <button
-                                type="button"
-                                className={`server-btn ${streamData.provider === "animepahe" ? "active" : ""}`}
-                                onClick={() => switchProvider("animepahe")}
+                            <select
+                                className="server-dropdown"
+                                value={streamData.provider || "animepahe"}
+                                onChange={(e) => switchProvider(e.target.value)}
                             >
-                                PAHE
-                            </button>
-                            <button
-                                type="button"
-                                className={`server-btn ${streamData.provider === "reanime" ? "active" : ""}`}
-                                onClick={() => switchProvider("reanime")}
-                            >
-                                RE:ANIME
-                            </button>
+                                <option value="shiroko">Shiroko</option>
+                                <option value="miruro">Miruro</option>
+                                <option value="animeverse">Animeverse</option>
+                                <option value="uniquestream">Uniquestream</option>
+                                <option value="reanime">Re:ANIME</option>
+                                <option value="animepahe">AnimePahe</option>
+                            </select>
                         </div>
                         <div className="watch-meta-chip">
                             <span className="icon">QUALITY:</span> 1080P

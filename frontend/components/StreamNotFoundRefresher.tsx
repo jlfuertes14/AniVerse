@@ -77,7 +77,7 @@ export default function StreamNotFoundRefresher({
             </p>
             {isRefreshing ? (
                 <p className="watch-empty-text">
-                    Auto-refreshing while the stream prepares ({secondsLeft}s remaining).
+                    Auto-refreshing to check for updates ({secondsLeft}s remaining).
                 </p>
             ) : (
                 <p className="watch-empty-text">

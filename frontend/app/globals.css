@@ -1233,6 +1233,27 @@ h6 {
   box-shadow: 0 0 12px rgba(212, 168, 67, 0.35);
 }
 
+.server-dropdown {
+  font-size: 0.62rem;
+  font-weight: 800;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  background: var(--gold);
+  color: #000;
+  border: 1px solid var(--gold);
+  box-shadow: 0 0 12px rgba(212, 168, 67, 0.35);
+  transition: all 0.2s ease;
+  cursor: pointer;
+  outline: none;
+  text-transform: uppercase;
+}
+
+.server-dropdown option {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
 .watch-meta-chip .icon {
   color: var(--gold);
   font-size: 0.65rem;

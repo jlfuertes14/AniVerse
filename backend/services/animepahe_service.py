@@ -679,8 +679,17 @@ async def get_animepahe_mapping(anilist_id: int) -> dict | None:
     return await db["provider_mappings"].find_one({"mal_id": anilist_id, "provider": "animepahe"})
 
 
-async def should_refresh_animepahe_catalog(anilist_id: int, requested_episode: int, expected_total: int = 0) -> tuple[bool, dict | None]:
+async def should_refresh_animepahe_catalog(anilist_id: int, requested_episode: int, expected_total: int = 0, force_refresh: bool = False) -> tuple[bool, dict | None]:
     mapping = await get_animepahe_mapping(anilist_id)
+    if force_refresh:
+        # If forced (e.g. user explicitly requested AnimePahe but stream is missing),
+        # only throttle for 1 minute to prevent spamming, but bypass the normal 4+ hour cache
+        if mapping and mapping.get("last_catalog_check_at"):
+            last_check = _parse_iso_datetime(mapping.get("last_catalog_check_at"))
+            if last_check and datetime.now(timezone.utc) - last_check < timedelta(minutes=1):
+                return False, mapping
+        return True, mapping
+
     if _is_next_airing_refresh_due(mapping):
         next_airing_episode = int(mapping.get("next_airing_episode", 0) or 0) if mapping else 0
         if next_airing_episode <= 0 or requested_episode >= next_airing_episode:

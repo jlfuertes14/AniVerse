@@ -118,6 +118,8 @@ export default function StreamPendingRefresher({
         nowMs,
     );
 
+    const providerName = provider.charAt(0).toUpperCase() + provider.slice(1).replace("reanime", "Re:ANIME");
+
     return (
         <section className="stream-pending-card" aria-live="polite">
             <div className="stream-pending-visual">
@@ -138,12 +140,12 @@ export default function StreamPendingRefresher({
             <div className="stream-pending-copy">
                 <div className="stream-pending-kicker">
                     <span className="stream-pending-dot" />
-                    {provider === "animepahe" ? "Connecting to backup stream server" : "Connecting to primary stream server"}
+                    Connecting to {providerName} server
                 </div>
                 <h2 className="stream-pending-title">{title}</h2>
                 <p className="stream-pending-episode">{episodeLabel}</p>
                 <p className="stream-pending-text">
-                    We&apos;re getting this episode ready for playback. Re:ANIME was unavailable, so we&apos;re trying AnimePahe as a backup.
+                    We&apos;re getting this episode ready for playback from {providerName}. Please hold on while we prepare the stream.
                 </p>
 
                 <div className="stream-pending-stats">
@@ -153,7 +155,7 @@ export default function StreamPendingRefresher({
                     </div>
                     <div className="stream-pending-stat">
                         <span className="stream-pending-stat-label">Now doing</span>
-                        <strong>{provider === "animepahe" ? "Scraping backup source (AnimePahe)" : "Checking Re:ANIME"}</strong>
+                        <strong>Scraping {providerName}</strong>
                     </div>
                     <div className="stream-pending-stat">
                         <span className="stream-pending-stat-label">Episodes found</span>
@@ -184,7 +186,6 @@ export default function StreamPendingRefresher({
 
                 <p className="stream-pending-hint">
                     We check again every {pollIntervalSeconds}s in the background and will load the player as soon as the stream is ready.
-                    {provider === "animepahe" ? " AnimePahe may take longer due to Cloudflare protection." : ""}
                 </p>
             </div>
         </section>

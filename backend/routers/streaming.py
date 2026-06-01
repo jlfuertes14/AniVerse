@@ -255,7 +255,9 @@ async def get_episode_stream(
             shiroko_stale = True
             if shiroko_mapping and shiroko_mapping.get("last_catalog_check_at"):
                 last_check = datetime.fromisoformat(shiroko_mapping["last_catalog_check_at"].replace("Z", "+00:00"))
-                if datetime.now(timezone.utc) - last_check < timedelta(minutes=15):
+                # If explicitly preferred and missing, only throttle for 1 minute instead of 15
+                throttle_minutes = 1 if prefer == "shiroko" else 15
+                if datetime.now(timezone.utc) - last_check < timedelta(minutes=throttle_minutes):
                     shiroko_stale = False
 
             if shiroko_stale:
@@ -300,7 +302,8 @@ async def get_episode_stream(
             miruro_stale = True
             if miruro_mapping and miruro_mapping.get("last_catalog_check_at"):
                 last_check = datetime.fromisoformat(miruro_mapping["last_catalog_check_at"].replace("Z", "+00:00"))
-                if datetime.now(timezone.utc) - last_check < timedelta(minutes=15):
+                throttle_minutes = 1 if prefer == "miruro" else 15
+                if datetime.now(timezone.utc) - last_check < timedelta(minutes=throttle_minutes):
                     miruro_stale = False
 
             if miruro_stale:
@@ -349,7 +352,8 @@ async def get_episode_stream(
             animeverse_stale = True
             if animeverse_mapping and animeverse_mapping.get("last_catalog_check_at"):
                 last_check = datetime.fromisoformat(animeverse_mapping["last_catalog_check_at"].replace("Z", "+00:00"))
-                if datetime.now(timezone.utc) - last_check < timedelta(minutes=15):
+                throttle_minutes = 1 if prefer == "animeverse" else 15
+                if datetime.now(timezone.utc) - last_check < timedelta(minutes=throttle_minutes):
                     animeverse_stale = False
 
             if animeverse_stale:
@@ -394,7 +398,8 @@ async def get_episode_stream(
             uniquestream_stale = True
             if uniquestream_mapping and uniquestream_mapping.get("last_catalog_check_at"):
                 last_check = datetime.fromisoformat(uniquestream_mapping["last_catalog_check_at"].replace("Z", "+00:00"))
-                if datetime.now(timezone.utc) - last_check < timedelta(minutes=15):
+                throttle_minutes = 1 if prefer == "uniquestream" else 15
+                if datetime.now(timezone.utc) - last_check < timedelta(minutes=throttle_minutes):
                     uniquestream_stale = False
 
             if uniquestream_stale:
@@ -440,7 +445,8 @@ async def get_episode_stream(
             reanime_stale = True
             if reanime_mapping and reanime_mapping.get("last_catalog_check_at"):
                 last_check = datetime.fromisoformat(reanime_mapping["last_catalog_check_at"].replace("Z", "+00:00"))
-                if datetime.now(timezone.utc) - last_check < timedelta(minutes=15):
+                throttle_minutes = 1 if prefer == "reanime" else 15
+                if datetime.now(timezone.utc) - last_check < timedelta(minutes=throttle_minutes):
                     reanime_stale = False
 
             if reanime_stale:
@@ -473,7 +479,8 @@ async def get_episode_stream(
         should_refresh, mapping = await should_refresh_animepahe_catalog(
             mal_id, 
             animepahe_requested_episode, 
-            expected_total=(anime.episodes or 0)
+            expected_total=(anime.episodes or 0),
+            force_refresh=(prefer == "animepahe")
         )
         available_episodes = int(mapping.get("latest_episode", 0)) if mapping else 0
 
