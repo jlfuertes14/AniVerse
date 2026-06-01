@@ -43,7 +43,7 @@ async def refresh_uniquestream_catalog(mal_id: int, title: str, episode_number: 
                     "status": "idle",
                     "last_success_at": datetime.utcnow().isoformat() + "Z",
                     "latest_episode": episode_number
-                }}
+                }, "$unset": {"last_scrape_error": ""}}
             )
             print(f"[Uniquestream] Successfully fetched stream for MAL {mal_id} Ep {episode_number}")
         else:

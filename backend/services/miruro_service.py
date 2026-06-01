@@ -55,19 +55,39 @@ async def refresh_miruro_catalog(mal_id: int, ep_number: int):
                 print(f"[Miruro] Failed to resolve AniList ID for MAL {mal_id}: {e}")
             
             if anilist_id:
-                await scrape_miruro_episode(anilist_id, mal_id, ep_number)
+                results = await scrape_miruro_episode(anilist_id, mal_id, ep_number)
+                if not results:
+                    print(f"[Miruro] Scraper returned no results for MAL {mal_id} Ep {ep_number}")
+                    await db["provider_mappings"].update_one(
+                        {"mal_id": mal_id, "provider": "miruro"},
+                        {"$set": {"last_scrape_error": "No stream found"}}
+                    )
+                else:
+                    await db["provider_mappings"].update_one(
+                        {"mal_id": mal_id, "provider": "miruro"},
+                        {"$set": {"last_success_at": datetime.utcnow().isoformat() + "Z"}, "$unset": {"last_scrape_error": ""}}
+                    )
             else:
                 print(f"[Miruro] Cannot scrape without anilist_id for MAL {mal_id}")
+                await db["provider_mappings"].update_one(
+                    {"mal_id": mal_id, "provider": "miruro"},
+                    {"$set": {"last_scrape_error": "No anilist_id"}}
+                )
                 
         except Exception as e:
             print(f"[Miruro] Background discovery failed for {mal_id}: {e}")
+            await db["provider_mappings"].update_one(
+                {"mal_id": mal_id, "provider": "miruro"},
+                {"$set": {"last_scrape_error": str(e)}},
+                upsert=True
+            )
         finally:
             _active_refreshes.discard(mal_id)
             await db["provider_mappings"].update_one(
                 {"mal_id": mal_id, "provider": "miruro"},
                 {"$set": {
                     "refreshing": False, 
-                    "last_catalog_check_at": datetime.now(timezone.utc).isoformat()
+                    "last_catalog_check_at": datetime.utcnow().isoformat() + "Z"
                 }, "$unset": {"refresh_started_at": ""}},
                 upsert=True
             )

@@ -255,8 +255,9 @@ async def get_episode_stream(
             shiroko_stale = True
             if shiroko_mapping and shiroko_mapping.get("last_catalog_check_at"):
                 last_check = datetime.fromisoformat(shiroko_mapping["last_catalog_check_at"].replace("Z", "+00:00"))
-                # If explicitly preferred and missing, only throttle for 1 minute instead of 15
-                throttle_minutes = 1 if prefer == "shiroko" else 15
+                # Short cooldown if preferred or if last attempt failed; full 15 min only on prior success
+                last_failed = shiroko_mapping.get("last_scrape_error") or not shiroko_mapping.get("last_success_at")
+                throttle_minutes = 1 if prefer == "shiroko" else (2 if last_failed else 15)
                 if datetime.now(timezone.utc) - last_check < timedelta(minutes=throttle_minutes):
                     shiroko_stale = False
 
@@ -302,7 +303,8 @@ async def get_episode_stream(
             miruro_stale = True
             if miruro_mapping and miruro_mapping.get("last_catalog_check_at"):
                 last_check = datetime.fromisoformat(miruro_mapping["last_catalog_check_at"].replace("Z", "+00:00"))
-                throttle_minutes = 1 if prefer == "miruro" else 15
+                last_failed = miruro_mapping.get("last_scrape_error") or not miruro_mapping.get("last_success_at")
+                throttle_minutes = 1 if prefer == "miruro" else (2 if last_failed else 15)
                 if datetime.now(timezone.utc) - last_check < timedelta(minutes=throttle_minutes):
                     miruro_stale = False
 
@@ -352,7 +354,8 @@ async def get_episode_stream(
             animeverse_stale = True
             if animeverse_mapping and animeverse_mapping.get("last_catalog_check_at"):
                 last_check = datetime.fromisoformat(animeverse_mapping["last_catalog_check_at"].replace("Z", "+00:00"))
-                throttle_minutes = 1 if prefer == "animeverse" else 15
+                last_failed = animeverse_mapping.get("last_scrape_error") or not animeverse_mapping.get("last_success_at")
+                throttle_minutes = 1 if prefer == "animeverse" else (2 if last_failed else 15)
                 if datetime.now(timezone.utc) - last_check < timedelta(minutes=throttle_minutes):
                     animeverse_stale = False
 
@@ -398,7 +401,8 @@ async def get_episode_stream(
             uniquestream_stale = True
             if uniquestream_mapping and uniquestream_mapping.get("last_catalog_check_at"):
                 last_check = datetime.fromisoformat(uniquestream_mapping["last_catalog_check_at"].replace("Z", "+00:00"))
-                throttle_minutes = 1 if prefer == "uniquestream" else 15
+                last_failed = uniquestream_mapping.get("last_scrape_error") or not uniquestream_mapping.get("last_success_at")
+                throttle_minutes = 1 if prefer == "uniquestream" else (2 if last_failed else 15)
                 if datetime.now(timezone.utc) - last_check < timedelta(minutes=throttle_minutes):
                     uniquestream_stale = False
 
@@ -441,11 +445,11 @@ async def get_episode_stream(
                     }
                 )
 
-            # Check if we recently tried and failed, to avoid infinite 202 loops
             reanime_stale = True
             if reanime_mapping and reanime_mapping.get("last_catalog_check_at"):
                 last_check = datetime.fromisoformat(reanime_mapping["last_catalog_check_at"].replace("Z", "+00:00"))
-                throttle_minutes = 1 if prefer == "reanime" else 15
+                last_failed = reanime_mapping.get("last_scrape_error") or not reanime_mapping.get("last_success_at")
+                throttle_minutes = 1 if prefer == "reanime" else (2 if last_failed else 15)
                 if datetime.now(timezone.utc) - last_check < timedelta(minutes=throttle_minutes):
                     reanime_stale = False
 
