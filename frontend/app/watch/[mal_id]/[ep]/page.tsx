@@ -124,7 +124,7 @@ export default async function WatchPage({
     // 3. We fallback to 12 as a sensible minimum for UI layout if no data exists.
     let totalEpisodes: number;
     const isMovie = anime?.type === "Movie";
-    if (isMovie && jikanEpisodes === 1) {
+    if (isMovie) {
         totalEpisodes = 1;
     } else if (isAiring) {
         totalEpisodes = Math.max(providerEpisodes, normalizedEpisode);
@@ -167,7 +167,7 @@ export default async function WatchPage({
     }
 
     const resolvedStreamData: StreamResponse = streamData;
-    const isSingleEpisode = totalEpisodes === 1;
+    const isSingleEpisode = isMovie;
 
     return (
         <>

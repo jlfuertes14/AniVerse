@@ -79,9 +79,10 @@ async def _get_latest_episode_number(db, mal_id: int, source: str | None = None)
     latest_db = await db["streams"].find_one(query, sort=[("episode", -1)])
     db_count = int(latest_db.get("episode", 0)) if latest_db else 0
     
-    # Check provider mapping for Re:ANIME specifically to get the total available on site
-    if source == "reanime":
-        mapping = await db["provider_mappings"].find_one({"mal_id": mal_id, "provider": "reanime"})
+    # Provider catalog metadata can know about episodes before every stream row
+    # has been individually resolved.
+    if source:
+        mapping = await db["provider_mappings"].find_one({"mal_id": mal_id, "provider": source})
         if mapping and mapping.get("latest_episode"):
             return max(db_count, int(mapping["latest_episode"]))
 
