@@ -189,12 +189,21 @@ async def get_episode_stream(
                 s_url = None
 
             if stream_data.get("source") == "animepahe" and e_url and "kwik" in e_url and not s_url:
-                background_tasks.add_task(
-                    _resolve_and_cache_embed_stream,
-                    db,
-                    stream_data["_id"],
-                    e_url,
-                )
+                # Resolve kwik embed inline so the response has a direct stream URL
+                try:
+                    print(f"[Streaming] Resolving kwik embed inline: {e_url}")
+                    direct_url = await resolve_animepahe_embed_stream(e_url)
+                    if direct_url:
+                        s_url = direct_url
+                        await db["streams"].update_one(
+                            {"_id": stream_data["_id"]},
+                            {"$set": {"stream_url": direct_url, "embed_url": e_url, "updated_at": "resolved"}}
+                        )
+                        print(f"[Streaming] Kwik resolved to direct stream: {direct_url[:80]}...")
+                    else:
+                        print(f"[Streaming] Kwik resolution returned no URL, falling back to embed")
+                except Exception as e:
+                    print(f"[Streaming] Kwik inline resolution failed: {e}, falling back to embed")
 
             mapping_for_status = None
             src = stream_data.get("source")
