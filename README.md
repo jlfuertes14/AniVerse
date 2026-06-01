@@ -1,3 +1,12 @@
+---
+title: AniVerse
+emoji: 🌌
+colorFrom: indigo
+colorTo: purple
+sdk: docker
+pinned: false
+---
+
 # 🌌 AniVerse — Next-Generation Anime Discovery Engine
 
 <p align="center">
