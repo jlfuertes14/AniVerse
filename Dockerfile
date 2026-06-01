@@ -2,15 +2,14 @@ FROM mcr.microsoft.com/playwright/python:v1.40.0-jammy
 
 WORKDIR /app
 
-# Switch to non-root user (Hugging Face Spaces requirement)
-RUN useradd -m -u 1000 user
-USER user
-ENV HOME=/home/user \
-	PATH=/home/user/.local/bin:$PATH
+# Switch to existing non-root user (pwuser has UID 1000 in Playwright images)
+USER pwuser
+ENV HOME=/home/pwuser \
+	PATH=/home/pwuser/.local/bin:$PATH
 
 WORKDIR $HOME/app
 
-COPY --chown=user . $HOME/app
+COPY --chown=pwuser . $HOME/app
 
 # Install python dependencies
 RUN pip install --no-cache-dir --upgrade -r requirements.txt
